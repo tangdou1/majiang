@@ -22,11 +22,11 @@ Godot 4.7 单机四川麻将，横屏手机版（1920×1080 设计，手牌沿�
 ```
 scripts/
   core/            纯逻辑（无 UI 依赖）
-    tile.gd, tile_wall.gd, meld.gd, hand.gd
-    win_checker.gd, win_context.gd, win_result.gd
-    rules/         mahjong_rule.gd（基类） + sichuan_rule.gd
-    players/       player.gd, human_player.gd, ai_player.gd, name_gen.gd
-    game/          round_controller.gd（一局）, match_controller.gd（整场）
+	tile.gd, tile_wall.gd, meld.gd, hand.gd
+	win_checker.gd, win_context.gd, win_result.gd
+	rules/         mahjong_rule.gd（基类） + sichuan_rule.gd
+	players/       player.gd, human_player.gd, ai_player.gd, name_gen.gd
+	game/          round_controller.gd（一局）, match_controller.gd（整场）
   ui/              main.gd, menu_view.gd, game_view.gd, tile_view.gd, fx.gd, ui_font.gd
   audio/           sfx.gd（播放器池）
   ui/vfx.gd        额外特效（光点、放射光线、彩纸、漂浮光点）
@@ -35,16 +35,5 @@ assets/
   sfx/*.wav               由 tools/gen_sounds.py 生成
   voice/*.wav             报牌与叫牌人声（33 段，由 tools/split_voice.py 切分）
   fonts/NotoSerifSC.ttf   标题字体
-tools/gen_sounds.py       音效生成脚本（需要 numpy）
-tools/split_voice.py      人声切分脚本；原始整段配音在 tools/voice_raw/
-tools/make_icon.py        应用图标生成脚本（输出 assets/icon/）
-tests/
-  test_core.gd            核心逻辑测试（胡牌牌型、定缺、结算、80 局 AI 模拟的守恒检查）
-  screenshot.gd           界面交互冒烟测试 + 截图（需要图形环境）
-  tile_sheet.gd           27 张牌面样张截图
-  （test_core 每次摸牌、出牌后检查 108 张守恒）
-  voice_check.gd          人声加载与播放自检
-export/MahjongArena-debug.apk   调试版 APK（约 61MB）
+export/
 ```
-
-
