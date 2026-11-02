@@ -48,3 +48,17 @@ assets/
   sfx/*.wav               程序合成的音效
   voice/*.wav             报牌与叫牌人声（33 段）
 ```
+
+## 导出 Android APK
+
+本项目使用 Godot 4.7 stable 和仓库内的 `Android` 导出预设，默认生成仅支持 **arm64-v8a** 的调试 APK。可在 GitHub 仓库的 **Actions → Android debug APK → Run workflow** 手动运行构建，完成后从该次运行的 Artifacts 下载 `MahjongArena-debug-apk`。工作流使用临时调试签名，适合安装测试；不同构建的签名可能不同，不能保证直接覆盖安装，不适合发布到应用商店。
+
+也可在本地安装 Godot 4.7 stable、对应版本的导出模板、JDK 17 和 Android SDK（含 platform-tools、build-tools），在 Godot 编辑器设置中配置 Java SDK、Android SDK 和调试密钥，然后执行：
+
+```sh
+mkdir -p export
+godot --headless --editor --path . --import
+godot --headless --path . --export-debug Android export/MahjongArena-debug.apk
+```
+
+正式发布需要使用自己的长期保存的发布密钥及独立的 release 导出配置，不要将密钥提交到仓库。
