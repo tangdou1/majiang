@@ -31,8 +31,24 @@ jobs:
           ./godot --headless --path . --script res://tests/run_tests.gd 2>&1 | tee /tmp/core.log
           echo "::notice title=core 逻辑测试::$(grep -E '全部通过|失败 [0-9]+|一局打完' /tmp/core.log | tr '\n' ' ' | cut -c1-900)"
 
+      - name: 主场景空跑（180 帧）
+        run: |
+          set -o pipefail
+          ./godot --headless --path . --quit-after 180 2>&1 | tee /tmp/main.log
+          echo "::notice title=主场景空跑::已跑 180 帧"
+
       - name: 界面冒烟测试
         run: |
           set -o pipefail
           ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee /tmp/ui.log
           echo "::notice title=界面冒烟测试::$(grep -E '通过|失败|SMOKE|标记' /tmp/ui.log | tr '\n' ' ' | cut -c1-900)"
+
+      - name: 汇总运行日志里的错误（先只报告）
+        if: always()
+        run: |
+          for f in /tmp/import.log /tmp/core.log /tmp/main.log /tmp/ui.log; do
+            [ -f "$f" ] || continue
+            n=$(grep -cE 'SCRIPT ERROR|ERROR:' "$f" || true)
+            echo "::notice title=$(basename "$f") 错误行数::$n"
+            grep -E 'SCRIPT ERROR|ERROR:' "$f" | head -4 | cut -c1-300
+          done
