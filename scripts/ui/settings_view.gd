@@ -13,7 +13,6 @@ const GREY := Color("546e7a")
 var _pace_buttons: Array[Button] = []
 var _sfx_value: Label
 var _voice_value: Label
-var _music_value: Label
 var _panel: PanelContainer
 
 
@@ -89,7 +88,7 @@ func _build() -> void:
 	mute.text = "静音（音效与人声全部关闭）"
 	mute.button_pressed = Settings.muted
 	mute.add_theme_font_size_override("font_size", 28)
-	mute.add_theme_color_override("font_color", TEXT)
+	_set_check_text_color(mute)
 	mute.toggled.connect(_on_mute)
 	v.add_child(mute)
 
@@ -97,7 +96,7 @@ func _build() -> void:
 	vib.text = "出牌/和牌时震动（手机）"
 	vib.button_pressed = Settings.vibrate
 	vib.add_theme_font_size_override("font_size", 28)
-	vib.add_theme_color_override("font_color", TEXT)
+	_set_check_text_color(vib)
 	vib.toggled.connect(_on_vibrate)
 	v.add_child(vib)
 
@@ -179,14 +178,6 @@ func _refresh_value_labels() -> void:
 		_sfx_value.text = "%d%%" % roundi(Settings.sfx_volume * 100.0)
 	if _voice_value != null:
 		_voice_value.text = "%d%%" % roundi(Settings.voice_volume * 100.0)
-	if _music_value != null:
-		_music_value.text = "%d%%" % roundi(Settings.music_volume * 100.0)
-
-
-func _on_music_volume(value: float, _slider: HSlider) -> void:
-	Settings.music_volume = value
-	Settings.save_settings()
-	_refresh_value_labels()
 
 
 func _on_mute(on: bool) -> void:
@@ -197,6 +188,12 @@ func _on_mute(on: bool) -> void:
 func _on_vibrate(on: bool) -> void:
 	Settings.vibrate = on
 	Settings.save_settings()
+
+
+## CheckButton 在按下、悬停等状态会使用不同的主题文字颜色。
+func _set_check_text_color(button: CheckButton) -> void:
+	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		button.add_theme_color_override(state, TEXT)
 
 
 func _button(text: String, min_w: int, min_h: int) -> Button:

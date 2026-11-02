@@ -1,6 +1,6 @@
 class_name HelpView
 extends Control
-## 玩法说明：菜单首次进入、菜单“玩法”、暂停面板“玩法”都会打开它。
+## 玩法说明：通过菜单或暂停面板中的“玩法”打开。
 
 signal closed
 
@@ -15,7 +15,7 @@ const SECTIONS := [
 	["血战到底", "有人和牌后，其余人继续打，直到只剩一人没和或牌墙摸完。杠牌当场收分：明杠由放杠者付 2 分，补杠每家 1 分，暗杠每家 2 分。"],
 	["怎么出牌", "轮到你时，点一下牌选中（会抬起并描金），再点一下打出；不能打的牌会变暗。桌面端可以用 ←/→ 选牌、回车或空格打出。"],
 	["听牌提示", "手牌右下角会显示“打 三万 → 听 二万、五万（剩 5 张）”，听到的牌会按四家已经打出的牌扣除剩余张数。"],
-	["暂停与设置", "点右上角“菜单”或按 Esc 打开暂停面板：继续、玩法、设置、重新开始、返回菜单。设置里可以调出牌节奏、音效/人声/音乐音量和震动。"],
+	["暂停与设置", "点右上角“菜单”或按 Esc 打开暂停面板：继续、玩法、设置、重新开始、返回菜单。设置里可以调出牌节奏、音效/人声音量和震动。"],
 ]
 
 var _panel: PanelContainer
@@ -82,14 +82,6 @@ func _build() -> void:
 	footer.add_theme_constant_override("separation", 20)
 	outer.add_child(footer)
 
-	var remind := CheckButton.new()
-	remind.text = "启动时显示"
-	remind.button_pressed = Settings.show_tutorial
-	remind.add_theme_font_size_override("font_size", 24)
-	remind.add_theme_color_override("font_color", SUB)
-	remind.toggled.connect(_on_remind_toggled)
-	footer.add_child(remind)
-
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(spacer)
@@ -116,11 +108,6 @@ func close() -> void:
 	Settings.save_settings()
 	closed.emit()
 	queue_free()
-
-
-func _on_remind_toggled(on: bool) -> void:
-	Settings.show_tutorial = on
-	Settings.save_settings()
 
 
 func _center() -> void:
