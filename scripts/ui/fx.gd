@@ -13,12 +13,15 @@ func _draw() -> void:
 
 ## 在 parent 的 pos 处播放冲击波 + 粒子爆发
 static func burst(parent: Node, pos: Vector2, color: Color, strength: float = 1.0) -> void:
+	var light := Settings.reduced_motion
+	if light:
+		strength *= 0.45
 	var ring := Fx.new()
 	ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ring.position = pos
 	# HDR：让冲击波参与 bloom
-	var hot := UiTheme.hot(color, 1.8)
-	ring.ring_color = Color(hot.r, hot.g, hot.b, 0.9)
+	var hot := color if light else UiTheme.hot(color, 1.8)
+	ring.ring_color = Color(hot.r, hot.g, hot.b, 0.35 if light else 0.9)
 	ring.line_width = 6.0 * strength
 	# 俯视桌面：光圈压在桌面上，应是压扁的椭圆而不是正圆
 	ring.scale = Vector2(1.0, 0.42)
@@ -27,6 +30,9 @@ static func burst(parent: Node, pos: Vector2, color: Color, strength: float = 1.
 	tw.tween_property(ring, "radius", 90.0 * strength, 0.45).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	tw.tween_property(ring, "modulate:a", 0.0, 0.45)
 	tw.chain().tween_callback(ring.queue_free)
+	# 轻动效仅保留小而淡的落地圆环，不再炸开一团碎屑。
+	if light:
+		return
 
 	var p := CPUParticles2D.new()
 	p.position = pos
@@ -47,11 +53,11 @@ static func burst(parent: Node, pos: Vector2, color: Color, strength: float = 1.
 	p.color = UiTheme.hot(color, 1.8)
 	p.emitting = true
 	parent.add_child(p)
-	get_tree_safe_free(p, 1.0, parent)
+	get_tree_safe_free(p, 1.0)
 
 
-## 延迟释放节点（避免依赖 Tree 的 create_timer 引用）
-static func get_tree_safe_free(node: Node, seconds: float, parent: Node) -> void:
-	var tw := parent.create_tween()
+## 清理补间绑定到特效自身：中途切换轻动效并删除粒子时，不会回调已释放的节点。
+static func get_tree_safe_free(node: Node, seconds: float) -> void:
+	var tw := node.create_tween()
 	tw.tween_interval(seconds)
 	tw.tween_callback(node.queue_free)

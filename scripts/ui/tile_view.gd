@@ -1,6 +1,6 @@
 class_name TileView
 extends Control
-## 自绘麻将牌：象牙白底、立体边、双线内框；万/筒/条按传统样式绘制；背面为菱形纹；支持发光描边。
+## 自绘麻将牌：象牙白底、立体边、双线内框；万/筒/条按传统样式绘制；背面为菱形纹；支持内嵌细描边。
 
 signal tapped(view: TileView)
 
@@ -11,6 +11,7 @@ const INK := Color("1c1c1c")
 const BACK := Color("23694a")
 const BACK_EDGE := Color("123d2a")
 const BACK_INNER := Color("3a8f68")
+const HIGHLIGHT_INSET := 1.0
 
 # 筒：深蓝 / 象牙 / 红 同心环
 const DOT_BLUE := Color("1d4f9a")
@@ -72,14 +73,6 @@ func _draw() -> void:
 	if not squash.is_equal_approx(Vector2.ONE):
 		draw_set_transform(
 			Vector2(w * 0.5 * (1.0 - squash.x), h * 0.5 * (1.0 - squash.y)), 0.0, squash)
-	if glow.a > 0.01:
-		var g := StyleBoxFlat.new()
-		# 推到 HDR 亮度，让选中/最新打出这张牌的描边真正“亮”起来（见 Glow）
-		var halo := UiTheme.hot(glow, 1.9)
-		g.bg_color = Color(halo.r, halo.g, halo.b, glow.a * 0.35)
-		g.set_corner_radius_all(int(w * 0.2))
-		var pad := w * 0.12
-		draw_style_box(g, Rect2(-pad, -pad, w + pad * 2, h + pad * 2))
 
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = BACK if face_down else IVORY
@@ -98,6 +91,10 @@ func _draw() -> void:
 	draw_line(Vector2(w * 0.16, maxf(1.5, w * 0.035)), Vector2(w - w * 0.16, maxf(1.5, w * 0.035)),
 		bevel, maxf(1.0, w * 0.018), true)
 
+	# 金框只画在牌内，不再用向外扩张的实心光块；相邻手牌/牌河也不会连成金带。
+	if glow.a > 0.01:
+		draw_style_box(_highlight_style(w), rect.grow(-HIGHLIGHT_INSET))
+
 	if face_down:
 		_draw_back(w, h)
 		return
@@ -113,6 +110,15 @@ func _draw() -> void:
 			_draw_circles(w, h)
 		_:
 			_draw_bamboo(w, h)
+
+
+func _highlight_style(w: float) -> StyleBoxFlat:
+	var outline := StyleBoxFlat.new()
+	outline.draw_center = false
+	outline.border_color = UiTheme.hot(glow, 1.15)
+	outline.set_border_width_all(clampi(roundi(w * 0.016), 1, 2))
+	outline.set_corner_radius_all(maxi(0, int(w * 0.12) - int(HIGHLIGHT_INSET)))
+	return outline
 
 
 func _draw_back(w: float, h: float) -> void:

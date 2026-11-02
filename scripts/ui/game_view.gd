@@ -14,6 +14,13 @@ const HUMAN_NAME := "你"
 ## 颜色一律来自 UiTheme 设计令牌，界面之间不再各自写十六进制
 const GOLD := UiTheme.GOLD
 const CREAM := UiTheme.CREAM
+## 仅在 _tiles_layer 内重排兄弟节点，同时统一绘制和点击顺序。
+## 不提升 z_index，避免手牌/飞牌越过特效、暂停和结算界面。
+enum TileLayer { TABLE, MELD, HAND, DRAWN, SELECTED, FLYING }
+const HAND_TILE_GAP := 4.0
+const HAND_SELECTION_LIFT := 42.0
+const HAND_DRAWN_LIFT := 10.0
+const SEAT_LABEL_WIDTH := 250.0
 ## 三门花色（万 / 筒 / 条）。用 static var 而非 const：跨类常量数组的编译期求值不够稳妥
 static var SUIT_COLORS: Array = UiTheme.SUIT
 
@@ -35,6 +42,10 @@ var _overlay: ColorRect      # 胡牌时的金色闪光
 var _title: Label
 var _info: Label
 var _score_labels: Array[Label] = []
+var _turn_indicator: TurnIndicator
+var _shake_tween: Tween
+var _flash_tween: Tween
+var _fireworks_tween: Tween
 var _banner: Label
 var _action_bar: HBoxContainer
 var _result_box: PanelContainer
@@ -67,6 +78,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_static_ui()
 	_layout_static()
+	_apply_effects_setting()
 	resized.connect(_on_resized)
 
 
@@ -74,6 +86,7 @@ func start_match(rule_id: String, speed: float) -> void:
 	_speed = speed
 	_rule_id = rule_id
 	_aborted = false
+	_cur_turn = -1
 	_drawn_tile = null
 	_payments.clear()
 	_tile_seat.clear()
@@ -117,6 +130,7 @@ func _run_match() -> void:
 
 func _connect_round(r: RoundController) -> void:
 	r.round_started.connect(func(_d: int) -> void:
+		_cur_turn = -1
 		_last_discard = null
 		_pool.clear()
 		_reveal = false
@@ -142,6 +156,7 @@ func _connect_round(r: RoundController) -> void:
 		_sfx.play("whoosh", 0.95 + randf() * 0.15, -4.0)
 		_refresh())
 	r.meld_made.connect(func(seat: int, m: Meld) -> void:
+		_cur_turn = seat
 		var center := _seat_origin(seat)
 		if m.is_kong():
 			_sfx.play("kong", 1.0, 0.0)
@@ -166,7 +181,8 @@ func _connect_round(r: RoundController) -> void:
 			_flash_banner(text, CREAM)
 		_refresh_labels())
 	r.player_won.connect(func(seat: int, _res: WinResult, self_drawn: bool) -> void:
-		_celebrate(seat, self_drawn))
+		_celebrate(seat, self_drawn)
+		_refresh_labels())
 	r.transfers_applied.connect(func(tr: Array) -> void:
 		_payments.append_array(tr)
 		_refresh_labels())
@@ -278,16 +294,16 @@ func _confirm_selection() -> void:
 
 
 func _on_tile_tapped(view: TileView) -> void:
-	if _mode != "discard" or view.tile == null:
+	if _mode != "discard" or view.tile == null or not _human.hand.concealed.has(view.tile):
 		return
 	if not _allowed.has(view.tile):
 		_flash_banner("这张牌现在不能打", UiTheme.HU)
 		_shake(3.0)
 		return
-	# 点击反馈：轻微下压
+	# 点击反馈走独立挤压属性，不与布局/飞牌的 scale 补间争抢。
 	var tw := view.create_tween()
-	tw.tween_property(view, "scale", Vector2(0.92, 0.92), 0.05)
-	tw.tween_property(view, "scale", Vector2(1.0, 1.0), 0.08)
+	tw.tween_property(view, "squash", Vector2(0.97, 0.97), 0.05)
+	tw.tween_property(view, "squash", Vector2.ONE, 0.08)
 	if _selected_tile == view.tile:
 		var t := view.tile
 		_selected_tile = null
@@ -505,47 +521,48 @@ func _clamp_row_start(center_x: float, len: float) -> float:
 	return clampf(x, r.position.x, maxf(r.position.x, r.end.x - len))
 
 
+## 给 14 张手牌、牌间距和摸牌间隔一起预留宽度；静态信息区也使用同一尺寸。
+func _hand_tile_width() -> float:
+	return minf(124.0, (size.x - 240.0 - HAND_TILE_GAP * 13.0) / 14.34)
+
+
 ## 计算每张牌的目标位置（屏幕坐标）。返回 Array[Dictionary]
 func _build_entries() -> Array:
 	var out: Array = []
 	var w := size.x
 	var h := size.y
-	var hw := minf(124.0, (w - 240.0) / 14.2)
+	var hw := _hand_tile_width()
 	var hh := hw * 1.42
 	var hand_top := h - hh - 20.0
 
 	# ---- 自己：手牌（底边，最长边）；刚摸到的牌单独摆在最右侧 ----
 	var hand := _human.hand
 	var drawn := _current_drawn()
-	var ordered: Array = []
-	for t in hand.concealed:
-		if t != drawn:
-			ordered.append(t)
-	var n := ordered.size() + (1 if drawn != null else 0)
+	var ordered := _ordered_hand()
+	var n := ordered.size()
 	var gap := hw * 0.34 if drawn != null else 0.0
-	var total := hw * n + gap
+	var total := hw * n + HAND_TILE_GAP * maxi(0, n - 1) + gap
 	var hand_x := _clamp_row_start(w * 0.5, total)
 	var x := hand_x
-	for i in ordered.size():
-		var t: Tile = ordered[i]
-		var lifted := _selected_tile == t
-		var center := Vector2(x + hw * 0.5, hand_top + hh * 0.5 - (42.0 if lifted else 0.0))
+	for t: Tile in ordered:
+		var is_drawn := t == drawn
+		if is_drawn:
+			x += gap
+		var lifted := _mode == "discard" and _selected_tile == t
+		var lift := HAND_SELECTION_LIFT if lifted else (HAND_DRAWN_LIFT if is_drawn else 0.0)
+		var center := Vector2(x + hw * 0.5, hand_top + hh * 0.5 - lift)
+		var dim := _mode == "discard" and not _allowed.has(t)
 		var glow := Color(0, 0, 0, 0)
-		var dim := false
-		if _mode == "discard":
-			if _allowed.has(t):
-				glow = Color(1.0, 0.85, 0.3, 0.9 if lifted else 0.45)
-			else:
-				dim = true
-		out.append(_entry(t, true, center, Vector2(hw, hh), 0.0, glow, dim, _deck_pos()))
-		x += hw
-	if drawn != null:
-		x += gap
-		var lifted_d := _selected_tile == drawn
-		var center_d := Vector2(x + hw * 0.5, hand_top + hh * 0.5 - (42.0 if lifted_d else 10.0))
-		var dim_d := _mode == "discard" and not _allowed.has(drawn)
-		out.append(_entry(drawn, true, center_d, Vector2(hw, hh), 0.0,
-			Color(1.0, 0.85, 0.3, 0.9 if lifted_d else 0.55), dim_d, _deck_pos()))
+		if not dim:
+			if lifted:
+				glow = Color(GOLD, 0.95)
+			elif is_drawn:
+				glow = Color(GOLD, 0.55)
+			elif _mode == "discard":
+				glow = Color(GOLD, 0.18)
+		var layer := TileLayer.SELECTED if lifted else (TileLayer.DRAWN if is_drawn else TileLayer.HAND)
+		out.append(_entry(t, true, center, Vector2(hw, hh), 0.0, glow, dim, _deck_pos(), null, layer))
+		x += hw + HAND_TILE_GAP
 	# 手牌上方：副露
 	var mw := hw * 0.62
 	var mh := mw * 1.42
@@ -553,7 +570,7 @@ func _build_entries() -> Array:
 	var my := hand_top - mh * 0.5 - 16.0
 	for m in hand.melds:
 		for t in m.tiles:
-			out.append(_entry(t, true, Vector2(mx + mw * 0.5, my), Vector2(mw, mh), 0.0, Color(0, 0, 0, 0), false, _seat_origin(0)))
+			out.append(_entry(t, true, Vector2(mx + mw * 0.5, my), Vector2(mw, mh), 0.0, Color(0, 0, 0, 0), false, _seat_origin(0), null, TileLayer.MELD))
 			mx += mw * 0.95
 		mx += 14.0
 
@@ -638,14 +655,14 @@ func _pool_entries(out: Array) -> void:
 		var c := i % POOL_COLS
 		var center := Vector2(ox + c * POOL_CELL.x + POOL_CELL.x * 0.5, oy + r * POOL_CELL.y + POOL_CELL.y * 0.5)
 		var t: Tile = tiles[i]
-		var glow := Color(1.0, 0.85, 0.3, 0.6) if t == _last_discard else Color(0, 0, 0, 0)
+		var glow := Color(GOLD, 0.8) if t == _last_discard else Color(0, 0, 0, 0)
 		out.append(_entry(t, true, center, POOL_TILE, 0.0, glow, false, center))
 
 
-func _entry(t: Tile, face: bool, center: Vector2, sz: Vector2, rot: float, glow: Color, dim: bool, spawn: Vector2, key: Variant = null) -> Dictionary:
+func _entry(t: Tile, face: bool, center: Vector2, sz: Vector2, rot: float, glow: Color, dim: bool, spawn: Vector2, key: Variant = null, layer: int = TileLayer.TABLE) -> Dictionary:
 	var k: Variant = key if key != null else t.get_instance_id()
 	return {"key": k, "tile": t, "face": face, "center": center, "size": sz, "rot": rot,
-		"glow": glow, "dim": dim, "spawn": spawn}
+		"glow": glow, "dim": dim, "spawn": spawn, "layer": layer}
 
 
 func _seat_origin(seat: int) -> Vector2:
@@ -676,7 +693,6 @@ func _apply_entries(entries: Array) -> void:
 			v = TileView.new()
 			v.size = sz
 			v.pivot_offset = sz * 0.5
-			v.mouse_filter = Control.MOUSE_FILTER_STOP if e["face"] and not e["tile"] == null else Control.MOUSE_FILTER_IGNORE
 			v.tapped.connect(_on_tile_tapped)
 			_tiles_layer.add_child(v)
 			_views[key] = v
@@ -686,8 +702,12 @@ func _apply_entries(entries: Array) -> void:
 			elif t != null and not _flying.has(t.get_instance_id()):
 				origin = e["spawn"]
 			v.position = origin - sz * 0.5
-			v.scale = Vector2(0.3, 0.3)
+			v.scale = Vector2.ONE * (0.94 if Settings.reduced_motion else 0.3)
 			v.modulate.a = 0.0
+		# 牌视图会在手牌、牌河和副露之间复用，点击权限必须跟着位置刷新。
+		# 只有自己的手牌接收点击，碰/杠和牌河不应截走选牌事件。
+		var interactive := _mode == "discard" and t != null and _human.hand.concealed.has(t)
+		v.mouse_filter = Control.MOUSE_FILTER_STOP if interactive else Control.MOUSE_FILTER_IGNORE
 		v.setup(t, not e["face"])
 		v.size = sz
 		v.pivot_offset = sz * 0.5
@@ -700,6 +720,18 @@ func _apply_entries(entries: Array) -> void:
 	for key in _views.keys():
 		if not seen.has(key):
 			_retire(key)
+	_order_tile_views(entries)
+
+
+## 持久化视图不能依赖创建先后：选中牌始终在副露之上，飞牌始终在牌桌最上层。
+## 同层保持布局里的顺序，正在退场的旧视图留在底层；外部 HUD / 模态层级不变。
+func _order_tile_views(entries: Array) -> void:
+	for layer in range(TileLayer.TABLE, TileLayer.FLYING + 1):
+		for e in entries:
+			var v: TileView = _views[e["key"]]
+			var effective_layer: int = TileLayer.FLYING if v.get_meta("flying", false) else e["layer"]
+			if effective_layer == layer:
+				_tiles_layer.move_child(v, -1)
 
 
 func _move(v: TileView, e: Dictionary, is_new: bool) -> void:
@@ -707,14 +739,15 @@ func _move(v: TileView, e: Dictionary, is_new: bool) -> void:
 		return  # 正在飞行，等落地后再同步位置（否则会打断落地效果）
 	var center: Vector2 = e["center"]
 	var sz: Vector2 = e["size"]
-	var lift := -42.0 if (e["tile"] != null and _selected_tile == e["tile"]) else 0.0
-	var target := center - sz * 0.5 + Vector2(0, lift)
+	# center 已包含选牌/摸牌抬升，这里不能再减一次。
+	var target := center - sz * 0.5
 	var tw := _tween_of(v)
 	tw.set_parallel(true)
 	var dur := 0.42 if is_new else 0.34
 	tw.tween_property(v, "position", target, dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(v, "rotation", e["rot"], dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(v, "scale", Vector2(1.04, 1.04) if lift < 0.0 else Vector2.ONE, dur).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# 选中状态用抬升 + 细描边表达，不横向放大挤到相邻牌。
+	tw.tween_property(v, "scale", Vector2.ONE, dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(v, "modulate", Color(0.6, 0.6, 0.6, 1) if e["dim"] else Color.WHITE, 0.2)
 	tw.tween_property(v, "modulate:a", 1.0, 0.25)
 
@@ -726,7 +759,7 @@ func _fly_discard(v: TileView, e: Dictionary, fid: int) -> void:
 	var t: Tile = e["tile"]
 	var target: Vector2 = e["center"]
 	var start := v.position + v.size * 0.5
-	var ctrl := (start + target) * 0.5 + Vector2(0, -220.0)
+	var ctrl := (start + target) * 0.5 + Vector2(0, -60.0 if Settings.reduced_motion else -220.0)
 	v.set_meta("flying", true)
 	var tw := _tween_of(v)
 	tw.tween_method(_arc_step.bind(v, start, ctrl, target), 0.0, 1.0, 0.46).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
@@ -738,17 +771,18 @@ func _fly_discard(v: TileView, e: Dictionary, fid: int) -> void:
 func _arc_step(t: float, v: TileView, s: Vector2, c: Vector2, e: Vector2) -> void:
 	var p := s.lerp(c, t).lerp(c.lerp(e, t), t)
 	v.position = p - v.size * 0.5
-	v.scale = Vector2.ONE * (1.0 + 0.3 * sin(PI * t))
+	v.scale = Vector2.ONE * (1.0 + (0.06 if Settings.reduced_motion else 0.3) * sin(PI * t))
 
 
 func _on_discard_land(t: Tile, pos: Vector2, v: TileView) -> void:
 	v.set_meta("flying", false)
 	_refresh()  # 同步到牌河的最终位置
 	# 落桌挤压回弹：牌先被压扁再弹回，配合震屏才有重量感（走 squash，不抢 scale 补间）
-	v.squash = Vector2(1.18, 0.82)
+	var light := Settings.reduced_motion
+	v.squash = Vector2(1.04, 0.96) if light else Vector2(1.18, 0.82)
 	var st := v.create_tween()
-	st.tween_property(v, "squash", Vector2(0.94, 1.06), 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	st.tween_property(v, "squash", Vector2.ONE, 0.16).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	st.tween_property(v, "squash", Vector2.ONE if light else Vector2(0.94, 1.06), 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	st.tween_property(v, "squash", Vector2.ONE, 0.16).set_trans(Tween.TRANS_CUBIC if light else Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	_bubble(pos + Vector2(0, -52), _tile_name(t), CREAM)
 	_sfx.play_tile_impact(t.suit, t.rank)
 	_sfx.play("shimmer", 1.0, -14.0)
@@ -767,7 +801,7 @@ func _retire(key: Variant) -> void:
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var tw := v.create_tween().set_parallel(true)
 	tw.tween_property(v, "modulate:a", 0.0, 0.3)
-	tw.tween_property(v, "scale", Vector2(0.4, 0.4), 0.3)
+	tw.tween_property(v, "scale", Vector2.ONE * (0.94 if Settings.reduced_motion else 0.4), 0.3)
 	tw.chain().tween_callback(v.queue_free)
 
 
@@ -784,20 +818,48 @@ func _tween_of(v: Control) -> Tween:
 func _refresh_labels() -> void:
 	if _round == null:
 		return
+	var active_seat := _active_turn_seat()
 	for i in _players.size():
 		var p := _players[i] as Player
 		var l := _score_labels[i]
 		l.text = "%s  %+d" % [p.display_name, p.score] if p.score != 0 else "%s  0" % p.display_name
-		l.add_theme_color_override("font_color", GOLD if i == _cur_turn else CREAM)
+		l.add_theme_color_override("font_color", GOLD if i == active_seat else CREAM)
 		var chip := _chips[i]
 		chip.visible = p.missing_suit >= 0
 		if p.missing_suit >= 0:
 			(chip.get_child(0) as Label).text = "缺" + Tile.SUIT_CHARS[p.missing_suit]
 			chip.add_theme_stylebox_override("panel", _chip_style(SUIT_COLORS[p.missing_suit]))
+	_layout_seat_labels()
 	_update_hint()
 	_info.text = "第 %d/%d 局 · 庄家 %s · 余牌 %d" % [
 		_match.round_index, _match.total_rounds, _players[_round.dealer].display_name,
 		_round.wall.remaining()]
+
+
+## 血战到底中已胡玩家不再行动；开局定缺、局末和退出时也不显示行动标记。
+func _active_turn_seat() -> int:
+	if _aborted or _round == null or _round.round_over or _cur_turn < 0 or _cur_turn >= _players.size():
+		return -1
+	return -1 if (_players[_cur_turn] as Player).finished else _cur_turn
+
+
+func _refresh_turn_indicator() -> void:
+	if _turn_indicator == null:
+		return
+	var seat := _active_turn_seat()
+	_turn_indicator.set_active(seat >= 0, Settings.reduced_motion)
+	if seat < 0:
+		return
+	var label := _score_labels[seat]
+	var font := label.get_theme_font("font")
+	var text_width := minf(label.size.x,
+		font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.get_theme_font_size("font_size")).x)
+	var text_x := label.position.x
+	if seat == 1:
+		text_x += label.size.x - text_width
+	# 左/下家在文字右侧，右/上家在文字左侧；向桌内留白放置，不挤占手牌或定缺标签。
+	var dot_x := text_x - TurnIndicator.GAP - TurnIndicator.DIAMETER if seat == 1 or seat == 2 else text_x + text_width + TurnIndicator.GAP
+	_turn_indicator.position = Vector2(dot_x, label.position.y + (label.size.y - TurnIndicator.DIAMETER) * 0.5)
 
 
 # ============================ 特效 ============================
@@ -807,10 +869,58 @@ func _burst_at(pos: Vector2, color: Color, strength: float) -> void:
 
 
 func _shake(amount: float) -> void:
-	var tw := _world.create_tween()
+	if _shake_tween != null and _shake_tween.is_valid():
+		_shake_tween.kill()
+	_shake_tween = null
+	_world.position = Vector2.ZERO
+	if Settings.reduced_motion:
+		return
+	# 碰杠/胡牌可能连续触发，不让多个震屏补间互相抢位置。
+	_shake_tween = _world.create_tween()
 	for i in 6:
-		tw.tween_property(_world, "position", Vector2(randf_range(-amount, amount), randf_range(-amount, amount)), 0.03)
-	tw.tween_property(_world, "position", Vector2.ZERO, 0.04)
+		_shake_tween.tween_property(_world, "position", Vector2(randf_range(-amount, amount), randf_range(-amount, amount)), 0.03)
+	_shake_tween.tween_property(_world, "position", Vector2.ZERO, 0.04)
+
+
+func _stop_attention_effects() -> void:
+	for tw: Tween in [_shake_tween, _flash_tween, _fireworks_tween]:
+		if tw != null and tw.is_valid():
+			tw.kill()
+	_shake_tween = null
+	_flash_tween = null
+	_fireworks_tween = null
+	_world.position = Vector2.ZERO
+	_overlay.color.a = 0.0
+
+
+## 暂停面板内切换也立即生效，清掉正在播放/尚未触发的强特效，不打断飞牌和规则流程。
+func _apply_effects_setting() -> void:
+	Vfx.apply_ambient_setting(_ambient)
+	_refresh_turn_indicator()
+	if not Settings.reduced_motion:
+		return
+	_stop_attention_effects()
+	for child in _fx_layer.get_children():
+		if child is Label:
+			_soften_text_fx(child)
+		else:
+			child.queue_free()
+	if _banner.modulate.a > 0.0:
+		_soften_text_fx(_banner)
+
+
+func _soften_text_fx(label: Label) -> void:
+	label.scale = Vector2.ONE
+	# 若恰好在文字淡入前切换，也要保留这条提示，不能停在透明状态。
+	label.modulate.a = 1.0
+	label.add_theme_color_override("font_color", label.get_theme_color("font_color").clamp())
+	label.add_theme_font_size_override("font_size", mini(120, label.get_theme_font_size("font_size")))
+	label.add_theme_constant_override("outline_size", mini(12, label.get_theme_constant("outline_size")))
+	var tw := _tween_of(label)
+	tw.tween_interval(0.6)
+	tw.tween_property(label, "modulate:a", 0.0, 0.35)
+	if label != _banner:
+		tw.tween_callback(label.queue_free)
 
 
 ## 胡牌庆祝：金色闪光 + 多点烟花 + 震屏 + 大字
@@ -844,10 +954,14 @@ func _bubble(pos: Vector2, text: String, color: Color, font_size: int = 40) -> v
 	l.size = Vector2(180, 60)
 	l.position = pos - l.size * 0.5
 	l.pivot_offset = l.size * 0.5
-	l.scale = Vector2(0.4, 0.4)
+	l.scale = Vector2.ONE if Settings.reduced_motion else Vector2(0.4, 0.4)
+	l.modulate.a = 0.0 if Settings.reduced_motion else 1.0
 	_fx_layer.add_child(l)
-	var tw := l.create_tween()
-	tw.tween_property(l, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	var tw := _tween_of(l)
+	if Settings.reduced_motion:
+		tw.tween_property(l, "modulate:a", 1.0, 0.18)
+	else:
+		tw.tween_property(l, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_interval(0.8)
 	tw.tween_property(l, "modulate:a", 0.0, 0.35)
 	tw.tween_callback(l.queue_free)
@@ -866,6 +980,7 @@ func _meld_call_name(m: Meld) -> String:
 
 
 func _celebrate(seat: int, self_drawn: bool) -> void:
+	_stop_attention_effects()
 	_sfx.play("hu", 1.0, 0.0)
 	var call := "zimo" if self_drawn else "hu"
 	var vt := create_tween()
@@ -874,19 +989,21 @@ func _celebrate(seat: int, self_drawn: bool) -> void:
 	_flash_banner("%s %s！" % [_players[seat].display_name, "自摸" if self_drawn else "胡"], UiTheme.HU)
 	_call_stamp("自摸" if self_drawn else "胡", UiTheme.HU)
 	Vfx.confetti(_fx_layer, size.x)
+	if Settings.reduced_motion:
+		return  # 文字与报牌照常，省去全屏闪光、烟花和彩纸。
 	_overlay.color = Color(1.0, 0.85, 0.3, 0.0)
-	var tw := _overlay.create_tween()
-	tw.tween_property(_overlay, "color:a", 0.35, 0.12)
-	tw.tween_property(_overlay, "color:a", 0.0, 0.8)
+	_flash_tween = _overlay.create_tween()
+	_flash_tween.tween_property(_overlay, "color:a", 0.35, 0.12)
+	_flash_tween.tween_property(_overlay, "color:a", 0.0, 0.8)
 	_shake(10.0)
-	var fw := _overlay.create_tween()
+	_fireworks_tween = _overlay.create_tween()
 	var w := size.x
 	var h := size.y
 	for i in 7:
 		var p := Vector2(randf_range(w * 0.15, w * 0.85), randf_range(h * 0.12, h * 0.6))
 		var col: Color = [GOLD, Color("ff7043"), Color("64b5f6"), Color("81c784")][i % 4]
-		fw.tween_callback(_burst_at.bind(p, col, 1.5))
-		fw.tween_interval(0.18)
+		_fireworks_tween.tween_callback(_burst_at.bind(p, col, 1.5))
+		_fireworks_tween.tween_interval(0.18)
 
 
 ## 叫牌大字：碰 / 杠 / 胡 / 自摸 时在屏幕中央砸下，并放射光线
@@ -900,21 +1017,22 @@ func _call_stamp(text: String, color: Color) -> void:
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size", 170)
-	l.add_theme_color_override("font_color", UiTheme.hot(color.lightened(0.25), 1.9))
+	l.add_theme_font_size_override("font_size", 120 if Settings.reduced_motion else 170)
+	l.add_theme_color_override("font_color", color.lightened(0.25) if Settings.reduced_motion else UiTheme.hot(color.lightened(0.25), 1.9))
 	l.add_theme_color_override("font_outline_color", Color(0.25, 0.05, 0.0, 0.95))
-	l.add_theme_constant_override("outline_size", 22)
+	l.add_theme_constant_override("outline_size", 12 if Settings.reduced_motion else 22)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	l.size = Vector2(420, 260)
 	l.position = center - l.size * 0.5
 	l.pivot_offset = l.size * 0.5
-	l.scale = Vector2(2.6, 2.6)
+	l.scale = Vector2.ONE if Settings.reduced_motion else Vector2(2.6, 2.6)
 	l.modulate.a = 0.0
 	_fx_layer.add_child(l)
-	var tw := l.create_tween()
+	var tw := _tween_of(l)
 	tw.set_parallel(true)
-	tw.tween_property(l, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(l, "modulate:a", 1.0, 0.12)
+	if not Settings.reduced_motion:
+		tw.tween_property(l, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(l, "modulate:a", 1.0, 0.18 if Settings.reduced_motion else 0.12)
 	tw.chain().tween_interval(0.7)
 	tw.chain().tween_property(l, "modulate:a", 0.0, 0.4)
 	tw.chain().tween_callback(l.queue_free)
@@ -923,11 +1041,14 @@ func _call_stamp(text: String, color: Color) -> void:
 
 func _flash_banner(text: String, color: Color) -> void:
 	_banner.text = text
-	_banner.add_theme_color_override("font_color", UiTheme.hot(color, 1.45))
-	_banner.modulate.a = 1.0
-	_banner.scale = Vector2(0.5, 0.5)
-	var tw := create_tween()
-	tw.tween_property(_banner, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_banner.add_theme_color_override("font_color", color if Settings.reduced_motion else UiTheme.hot(color, 1.45))
+	_banner.modulate.a = 0.0 if Settings.reduced_motion else 1.0
+	_banner.scale = Vector2.ONE if Settings.reduced_motion else Vector2(0.5, 0.5)
+	var tw := _tween_of(_banner)
+	if Settings.reduced_motion:
+		tw.tween_property(_banner, "modulate:a", 1.0, 0.18)
+	else:
+		tw.tween_property(_banner, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_interval(0.9)
 	tw.tween_property(_banner, "modulate:a", 0.0, 0.4)
 
@@ -1187,6 +1308,7 @@ func _open_settings_in_pause() -> void:
 	var view := SettingsView.new()
 	view.name = "PauseSettingsView"
 	view.closed.connect(_apply_pace_setting)
+	view.effects_changed.connect(_apply_effects_setting)
 	add_child(view)
 
 
@@ -1201,6 +1323,9 @@ func _abort_round() -> void:
 	if _aborted:
 		return
 	_aborted = true
+	_cur_turn = -1
+	_refresh_turn_indicator()
+	_stop_attention_effects()
 	if get_tree() != null:
 		get_tree().paused = false
 	_mode = ""
@@ -1299,6 +1424,9 @@ func _build_static_ui() -> void:
 		var l := Label.new()
 		l.add_theme_font_size_override("font_size", 26)
 		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if i == 1 else HORIZONTAL_ALIGNMENT_LEFT
+		l.clip_text = true
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		l.add_theme_color_override("font_color", CREAM)
 		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 		l.add_theme_constant_override("outline_size", 6)
@@ -1312,6 +1440,9 @@ func _build_static_ui() -> void:
 		chip.add_child(cl)
 		add_child(chip)
 		_chips.append(chip)
+
+	_turn_indicator = TurnIndicator.new()
+	add_child(_turn_indicator)
 
 	var menu_btn := _make_button("菜单", UiTheme.SLATE, 110)
 	menu_btn.name = "MenuButton"
@@ -1351,30 +1482,15 @@ func _layout_static() -> void:
 	_title.position = Vector2(24, 14)
 	_info.position = Vector2(24, 46)
 	_info.size = Vector2(700, 30)
-	var hw := minf(124.0, (w - 240.0) / 14.2)
+	var hw := _hand_tile_width()
 	var hh := hw * 1.42
 	_hint.size = Vector2(580.0, 34.0)
 	_hint.position = Vector2(maxf(w - 620.0, _safe_rect().position.x), h - hh - 118.0)
 	var menu := find_child("MenuButton", false, false) as Control
 	if menu:
 		menu.position = Vector2(w - 130, 6)
-	# 座位顺序：自己（下）、右家、对家（上）、左家。
-	# 名字与定缺标记分组放在对应手牌旁，避免与中央牌河重叠。
-	var side_tile_height := hw * 0.44 * 1.42
-	var seat_positions := [
-		Vector2(side_tile_height + 45, h - hh - 160),
-		Vector2(w - side_tile_height - 290, h * 0.35),
-		Vector2(w * 0.5 - 130, 8),
-		Vector2(side_tile_height + 45, h * 0.35),
-	]
+	_layout_seat_labels()
 	var safe := _safe_rect()
-	for i in _score_labels.size():
-		var pos: Vector2 = seat_positions[i]
-		# 名字 + 定缺标签最多占 250px，整体夹进安全区
-		pos.x = clampf(pos.x, safe.position.x, maxf(safe.position.x, safe.end.x - 250.0))
-		pos.y = clampf(pos.y, safe.position.y, maxf(safe.position.y, safe.end.y - 70.0))
-		_score_labels[i].position = pos
-		_chips[i].position = pos + (Vector2(250, 0) if i == 2 else Vector2(0, 34))
 	_ambient.position = Vector2(w * 0.5, h * 0.5)
 	_ambient.emission_rect_extents = Vector2(w * 0.5, h * 0.5)
 	_banner.position = Vector2(0, h * 0.42)
@@ -1383,6 +1499,39 @@ func _layout_static() -> void:
 	_action_bar.size = Vector2(840, 90)
 	_action_bar.position = Vector2(clampf(w * 0.5 - 420, safe.position.x, maxf(safe.position.x, safe.end.x - 840)),
 		minf(640.0, safe.end.y - 110.0))
+
+
+## 文本/分数/定缺变化后也重算标签宽度，避免右家短名字和不同标签向左漂移。
+func _layout_seat_labels() -> void:
+	var w := size.x
+	var h := size.y
+	var hh := _hand_tile_width() * 1.42
+	# 座位顺序：自己（下）、右家、对家（上）、左家。
+	# 名字与定缺标记分组放在对应手牌旁，避免与中央牌河重叠。
+	var side_tile_height := _hand_tile_width() * 0.44 * 1.42
+	var seat_positions := [
+		Vector2(side_tile_height + 45, h - hh - 160),
+		Vector2(w - side_tile_height - 45 - SEAT_LABEL_WIDTH, h * 0.35),
+		Vector2(w * 0.5 - 130, 8),
+		Vector2(side_tile_height + 45, h * 0.35),
+	]
+	var safe := _safe_rect()
+	for i in _score_labels.size():
+		var pos: Vector2 = seat_positions[i]
+		# 左右信息区镜像摆放：右家文字与标签都贴齐靠近手牌的一侧。
+		pos.x = clampf(pos.x, safe.position.x, maxf(safe.position.x, safe.end.x - SEAT_LABEL_WIDTH))
+		pos.y = clampf(pos.y, safe.position.y, maxf(safe.position.y, safe.end.y - 70.0))
+		_score_labels[i].position = pos
+		_score_labels[i].size = Vector2(SEAT_LABEL_WIDTH, 34)
+		var chip := _chips[i]
+		chip.size = chip.get_combined_minimum_size()
+		var chip_offset := Vector2(0, _score_labels[i].size.y + 4.0)
+		if i == 1:
+			chip_offset.x = SEAT_LABEL_WIDTH - chip.size.x
+		elif i == 2:
+			chip_offset = Vector2(SEAT_LABEL_WIDTH, 0)
+		chip.position = pos + chip_offset
+	_refresh_turn_indicator()
 
 
 func _on_resized() -> void:

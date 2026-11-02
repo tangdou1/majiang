@@ -1,6 +1,6 @@
 class_name Settings
 extends RefCounted
-## 全局设置：出牌节奏、音效/人声音量、静音。
+## 全局设置：出牌节奏、音效/人声音量、静音、轻动效。
 ## 持久化到 user://settings.cfg；音量通过独立的音频总线（SFX / Voice）控制，改动立即生效。
 
 const PATH := "user://settings.cfg"
@@ -16,6 +16,7 @@ static var pace_index: int = 2
 static var sfx_volume: float = 0.9
 static var voice_volume: float = 1.0
 static var muted: bool = false
+static var reduced_motion: bool = false
 
 static var _loaded: bool = false
 
@@ -39,6 +40,8 @@ static func load_settings() -> void:
 		sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", sfx_volume)), 0.0, 1.0)
 		voice_volume = clampf(float(cfg.get_value("audio", "voice_volume", voice_volume)), 0.0, 1.0)
 		muted = bool(cfg.get_value("audio", "muted", muted))
+		# 旧配置没有此项时仍使用原有完整动效。
+		reduced_motion = bool(cfg.get_value("visual", "reduced_motion", false))
 	apply_audio()
 
 
@@ -48,6 +51,7 @@ static func save_settings() -> void:
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
 	cfg.set_value("audio", "voice_volume", voice_volume)
 	cfg.set_value("audio", "muted", muted)
+	cfg.set_value("visual", "reduced_motion", reduced_motion)
 	cfg.save(PATH)
 	apply_audio()
 
