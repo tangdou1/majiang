@@ -49,6 +49,6 @@ jobs:
           for f in /tmp/import.log /tmp/core.log /tmp/main.log /tmp/ui.log; do
             [ -f "$f" ] || continue
             n=$(grep -cE 'SCRIPT ERROR|ERROR:' "$f" || true)
-            echo "::notice title=$(basename "$f") 错误行数::$n"
-            grep -E 'SCRIPT ERROR|ERROR:' "$f" | head -4 | cut -c1-300
+            first=$(grep -E 'SCRIPT ERROR|ERROR:' "$f" | head -1 | cut -c1-400)
+            echo "::notice title=$(basename "$f") 错误 $n 行::${first:-无}"
           done
