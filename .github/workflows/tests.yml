@@ -1,0 +1,61 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  godot-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Godot 4.7.2
+        run: |
+          curl -sSL -o godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q godot.zip
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+          chmod +x godot
+          ./godot --version | tee /tmp/version.log
+          echo "::notice title=Godot 版本::$(head -1 /tmp/version.log)"
+
+      - name: 导入资源（字体 / 音频）
+        run: ./godot --headless --path . --import 2>&1 | tee /tmp/import.log
+
+      - name: core 逻辑测试
+        run: |
+          set -o pipefail
+          ./godot --headless --path . --script res://tests/run_tests.gd 2>&1 | tee /tmp/core.log
+          echo "::notice title=core 逻辑测试::$(grep -E '全部通过|失败 [0-9]+|一局打完' /tmp/core.log | tr '\n' ' ' | cut -c1-900)"
+
+      - name: 主场景空跑（180 帧）
+        run: |
+          set -o pipefail
+          ./godot --headless --path . --quit-after 180 2>&1 | tee /tmp/main.log
+          echo "::notice title=主场景空跑::已跑 180 帧"
+
+      - name: 界面冒烟测试
+        run: |
+          set -o pipefail
+          ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee /tmp/ui.log
+          echo "::notice title=界面冒烟测试::$(grep -E '通过|失败|SMOKE|标记' /tmp/ui.log | tr '\n' ' ' | cut -c1-900)"
+
+      - name: 运行日志里不允许出现脚本错误
+        if: always()
+        run: |
+          fail=0
+          for f in /tmp/import.log /tmp/core.log /tmp/main.log /tmp/ui.log; do
+            [ -f "$f" ] || continue
+            # 退出时“resources still in use”是引擎的良性提示（静态缓存的字体/贴图），放行
+            bad=$(grep -E 'SCRIPT ERROR|ERROR:' "$f" | grep -v 'resources still in use at exit' || true)
+            if [ -n "$bad" ]; then
+              echo "::error title=$(basename "$f") 出现脚本错误::$(echo "$bad" | head -1 | cut -c1-400)"
+              fail=1
+            else
+              echo "::notice title=$(basename "$f")::无脚本错误"
+            fi
+          done
+          exit $fail

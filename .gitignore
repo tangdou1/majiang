@@ -1,0 +1,12 @@
+# Godot 生成的导入缓存与导出产物
+.godot/
+export/
+*.apk
+*.aab
+
+# 系统/编辑器杂项
+.DS_Store
+Thumbs.db
+
+# README 用的截图不参与游戏逻辑，导入元数据不提交（避免导出时被打进包）
+screenshot.png.import

@@ -7,6 +7,7 @@ extends Control
 ## 界面只负责展示与收集输入，规则全部在 core 层。
 
 signal exit_requested
+signal restart_requested(rule_id: String, pace: float)
 signal _continue_pressed
 
 const HUMAN_NAME := "你"
@@ -47,9 +48,21 @@ var _last_discard: Tile = null
 var _cur_turn: int = -1
 var _scores_before: Array = []
 
+var _rule_id: String = "sichuan"
+var _drawn_tile: Tile = null        # 自己刚摸到的牌（单独摆放并高亮）
+var _tile_seat: Dictionary = {}     # tile id -> 出牌者座位（报牌时区分音色）
+var _payments: Array = []           # 本局每一笔收付（带 reason）
+var _hint: Label                    # 听牌提示
+var _hint_key: String = ""          # 手牌状态指纹：没变化就不重算听牌（省手机 CPU）
+var _pause_layer: Control
+var _aborted: bool = false          # 退出/重开后，让所有协程干净地收尾
+var _continue_flag: bool = false    # 结算面板的“继续”信号：先置位再 emit，避免错过
+
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# 暂停时界面仍然响应（真正的流程冻结靠暂停中的计时器与 await）
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_static_ui()
 	_layout_static()
 	resized.connect(_on_resized)
@@ -57,6 +70,11 @@ func _ready() -> void:
 
 func start_match(rule_id: String, speed: float) -> void:
 	_speed = speed
+	_rule_id = rule_id
+	_aborted = false
+	_drawn_tile = null
+	_payments.clear()
+	_tile_seat.clear()
 	rule = MahjongRule.create(rule_id)
 	_players = []
 	_human = HumanPlayer.new(0, HUMAN_NAME)
@@ -74,6 +92,8 @@ func start_match(rule_id: String, speed: float) -> void:
 
 func _run_match() -> void:
 	while not _match.is_over():
+		if _aborted:
+			return
 		_round = _match.start_next_round()
 		_round.pace_time = _speed
 		_reveal = false
@@ -82,10 +102,14 @@ func _run_match() -> void:
 		_flash_banner("第 %d 局" % _match.round_index, CREAM)
 		_refresh()
 		await _round.play()
+		if _aborted:
+			return
 		_mode = ""
 		_action_bar_clear()
 		_refresh()
 		await _show_round_result()
+		if _aborted:
+			return
 	await _show_final_result()
 
 
@@ -94,15 +118,22 @@ func _connect_round(r: RoundController) -> void:
 		_last_discard = null
 		_pool.clear()
 		_reveal = false
+		_drawn_tile = null
+		_payments.clear()
+		_tile_seat.clear()
 		_refresh())
 	r.tile_drawn.connect(func(seat: int, t: Tile) -> void:
 		_cur_turn = seat
 		if seat == 0:
+			_drawn_tile = t
 			_sfx.play("draw", 1.0, -6.0)
 		_refresh())
 	r.tile_discarded.connect(func(seat: int, t: Tile) -> void:
 		_last_discard = t
 		_pool.append(t)
+		_tile_seat[t.get_instance_id()] = seat
+		if seat == 0:
+			_drawn_tile = null
 		_flying[t.get_instance_id()] = true
 		if seat != 0:
 			_discard_origin[t.get_instance_id()] = _seat_origin(seat)
@@ -118,7 +149,14 @@ func _connect_round(r: RoundController) -> void:
 		_burst_at(center, GOLD, 1.4)
 		_bubble(center + Vector2(0, -60), _meld_call_name_cn(m), GOLD)
 		_call_stamp(_meld_call_name_cn(m), GOLD)
-		_sfx.speak_call(_meld_call_name(m))
+		_sfx.speak_call(_meld_call_name(m), seat)
+		_vibrate(30)
+		if m.from_seat >= 0 and m.from_seat != seat and not m.tiles.is_empty():
+			var src := _players[m.from_seat] as Player
+			var taken := m.tiles[m.tiles.size() - 1]
+			_bubble(_seat_origin(m.from_seat) + Vector2(0, -46),
+				"来自%s的%s" % [src.display_name, _tile_name(taken)], CREAM, 26)
+		_drawn_tile = null
 		_refresh())
 	r.message.connect(func(seat: int, text: String) -> void:
 		if seat >= 0:
@@ -128,13 +166,15 @@ func _connect_round(r: RoundController) -> void:
 		_refresh_labels())
 	r.player_won.connect(func(seat: int, _res: WinResult, self_drawn: bool) -> void:
 		_celebrate(seat, self_drawn))
-	r.transfers_applied.connect(func(_tr: Array) -> void:
+	r.transfers_applied.connect(func(tr: Array) -> void:
+		_payments.append_array(tr)
 		_refresh_labels())
 	r.turn_changed.connect(func(seat: int) -> void:
 		_cur_turn = seat
 		_refresh_labels())
 	r.round_finished.connect(func(_draw: bool) -> void:
 		_cur_turn = -1
+		_drawn_tile = null
 		_reveal = true   # 本局结束：翻开所有 AI 的手牌
 		_refresh()
 		_refresh_labels())
@@ -155,7 +195,10 @@ func _on_human_awaiting(kind: String, payload: Variant) -> void:
 			_mode = "discard"
 			_allowed = payload
 			_selected_tile = null
-			_action_bar_prompt("轮到你出牌：点选一张牌，再点一次打出")
+			var prompt := "轮到你出牌：点选一张牌，再点一次打出"
+			if not OS.has_feature("mobile"):
+				prompt += "（←/→ 选牌，回车打出）"
+			_action_bar_prompt(prompt)
 		"option":
 			_mode = "option"
 			_show_options(payload["options"], payload["phase"])
@@ -178,6 +221,58 @@ func _choose(value: Variant) -> void:
 	_action_bar_clear()
 	_mode = "wait"
 	_human.submit(value)
+	_refresh()
+
+
+## 桌面端键盘：←/→ 选牌，回车/空格打出，Esc 暂停
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	var pause_open := _pause_layer != null and _pause_layer.visible
+	if key.keycode == KEY_ESCAPE:
+		if pause_open:
+			_close_pause()
+		else:
+			_open_pause()
+		get_viewport().set_input_as_handled()
+		return
+	if pause_open or _mode != "discard":
+		return
+	match key.keycode:
+		KEY_LEFT, KEY_A:
+			_cycle_selection(-1)
+		KEY_RIGHT, KEY_D:
+			_cycle_selection(1)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			_confirm_selection()
+		_:
+			return
+	get_viewport().set_input_as_handled()
+
+
+func _cycle_selection(step: int) -> void:
+	var pool: Array = []
+	for c in _ordered_hand():
+		if _allowed.has(c):
+			pool.append(c)
+	if pool.is_empty():
+		return
+	var idx := pool.find(_selected_tile)
+	idx = 0 if idx < 0 else posmod(idx + step, pool.size())
+	_selected_tile = pool[idx]
+	_sfx.play("select", 1.0, -3.0)
+	_refresh()
+
+
+func _confirm_selection() -> void:
+	if _selected_tile == null:
+		return
+	var t := _selected_tile
+	_selected_tile = null
+	_mode = "wait"
+	_action_bar_clear()
+	_human.submit(t)
 	_refresh()
 
 
@@ -205,6 +300,44 @@ func _on_tile_tapped(view: TileView) -> void:
 	_refresh()
 
 
+## 自己的手牌显示顺序：正常牌按排序 + 刚摸到的牌放最后
+func _ordered_hand() -> Array:
+	var out: Array = []
+	var drawn := _current_drawn()
+	for t in _human.hand.concealed:
+		if t != drawn:
+			out.append(t)
+	if drawn != null:
+		out.append(drawn)
+	return out
+
+
+## 刚摸到、且确实还在手上的那张牌（不在“必须打缺门”之外的 14 张状态时不显示）
+func _current_drawn() -> Tile:
+	if _drawn_tile == null:
+		return null
+	var hand := _human.hand
+	var sets := 4 - hand.melds.size()
+	if hand.concealed.size() != sets * 3 + 2:
+		return null
+	if not hand.concealed.has(_drawn_tile):
+		return null
+	return _drawn_tile
+
+
+## 这张牌是谁打出的（报牌时用于区分音色）
+func _discard_seat(t: Tile) -> int:
+	var id := t.get_instance_id()
+	if _tile_seat.has(id):
+		return int(_tile_seat[id])
+	return 0
+
+
+func _vibrate(ms: int) -> void:
+	if Settings.vibrate and OS.has_feature("mobile"):
+		Input.vibrate_handheld(ms)
+
+
 func _option_text(opt: Dictionary, phase: String) -> String:
 	match opt["action"]:
 		"hu":
@@ -218,6 +351,117 @@ func _option_text(opt: Dictionary, phase: String) -> String:
 		"kong_added":
 			return "补杠"
 	return "?"
+
+
+# ============================ 听牌提示 ============================
+
+## 四家可见的每种牌张数（手牌 + 副露 + 牌河），用来算“还剩几张”
+func _visible_kind_counts() -> PackedInt32Array:
+	var c := PackedInt32Array()
+	c.resize(WinChecker.KINDS)
+	c.fill(0)
+	for p in _players:
+		var pl := p as Player
+		for t in pl.hand.all_tiles():
+			c[t.kind()] += 1
+		for t in pl.discards:
+			c[t.kind()] += 1
+	return c
+
+
+## 听牌张数（扣掉已经现身的牌）
+func _waits_total(waits: Array, visible: PackedInt32Array) -> int:
+	var total := 0
+	for k in waits:
+		total += maxi(0, 4 - visible[k])
+	return total
+
+
+## “二万、五万（剩 3 张）”这样的文字；一张都不剩时返回空串
+func _waits_text(waits: Array, visible: PackedInt32Array) -> String:
+	var names: Array[String] = []
+	var total := 0
+	for k in waits:
+		var left := 4 - visible[k]
+		if left <= 0:
+			continue
+		names.append(Tile.NUMBER_NAMES[k % 9] + Tile.SUIT_CHARS[k / 9])
+		total += left
+	if names.is_empty():
+		return ""
+	return "%s（剩 %d 张）" % ["、".join(names), total]
+
+
+func _waiting_kinds(hand: Hand) -> Array:
+	if rule == null:
+		return []
+	var waits: Array = rule.waiting_kinds_of(hand)
+	if _human.missing_suit >= 0:
+		waits = waits.filter(func(k: int) -> bool: return Tile.suit_of_kind(k) != _human.missing_suit)
+	return waits
+
+
+## 打哪张能听牌：优先看当前选中的那张，否则给出剩余张数最多的一种
+func _best_discard_hint(hand: Hand, visible: PackedInt32Array) -> String:
+	var candidates: Array = []
+	if _selected_tile != null and _allowed.has(_selected_tile):
+		candidates.append(_selected_tile)
+	for t in _allowed:
+		if t != _selected_tile:
+			candidates.append(t)
+	var best_text := ""
+	var best_total := -1
+	for t in candidates:
+		if not hand.concealed.has(t):
+			continue
+		var h2 := hand.clone()
+		h2.remove(t)
+		var waits := _waiting_kinds(h2)
+		if waits.is_empty():
+			continue
+		var total := _waits_total(waits, visible)
+		if total <= 0:
+			continue
+		var text := "打 %s → 听 %s" % [_tile_name(t), _waits_text(waits, visible)]
+		if _selected_tile == t:
+			return text
+		if total > best_total:
+			best_total = total
+			best_text = text
+	if best_text == "" and _selected_tile != null:
+		return "打 %s 不听牌" % _tile_name(_selected_tile)
+	return best_text
+
+
+func _update_hint() -> void:
+	if _hint == null or rule == null or _human == null or _round == null:
+		return
+	var ids := 0
+	for t in _human.hand.concealed:
+		ids += t.get_instance_id()
+	var key := "%d|%d|%d|%d|%d|%d" % [_mode.hash(), int(_round.round_over),
+		_human.hand.concealed.size(), ids,
+		_selected_tile.get_instance_id() if _selected_tile != null else 0, int(_human.finished)]
+	if key == _hint_key:
+		return
+	_hint_key = key
+	var text := ""
+	if _human.finished:
+		text = "已和牌"
+	elif not _round.round_over:
+		var hand := _human.hand
+		var sets := 4 - hand.melds.size()
+		var size := hand.concealed.size()
+		var visible := _visible_kind_counts()
+		if size == sets * 3 + 2 and _mode == "discard":
+			text = _best_discard_hint(hand, visible)
+		elif size == sets * 3 + 1 and _human.missing_suit >= 0:
+			var waits := _waiting_kinds(hand)
+			var w := _waits_text(waits, visible)
+			if w != "":
+				text = "已听牌：" + w
+	_hint.text = text
+	_hint.visible = text != ""
 
 
 # ============================ 布局与刷新 ============================
@@ -238,16 +482,19 @@ func _build_entries() -> Array:
 	var hh := hw * 1.42
 	var hand_top := h - hh - 20.0
 
-	# ---- 自己：手牌（底边，最长边） ----
+	# ---- 自己：手牌（底边，最长边）；刚摸到的牌单独摆在最右侧 ----
 	var hand := _human.hand
-	var n := hand.concealed.size()
-	var gap := hw * 0.35 if n % 3 == 2 else 0.0
+	var drawn := _current_drawn()
+	var ordered: Array = []
+	for t in hand.concealed:
+		if t != drawn:
+			ordered.append(t)
+	var n := ordered.size() + (1 if drawn != null else 0)
+	var gap := hw * 0.34 if drawn != null else 0.0
 	var total := hw * n + gap
 	var x := (w - total) * 0.5
-	for i in n:
-		var t: Tile = hand.concealed[i]
-		if i == n - 1:
-			x += gap
+	for i in ordered.size():
+		var t: Tile = ordered[i]
 		var lifted := _selected_tile == t
 		var center := Vector2(x + hw * 0.5, hand_top + hh * 0.5 - (42.0 if lifted else 0.0))
 		var glow := Color(0, 0, 0, 0)
@@ -259,6 +506,13 @@ func _build_entries() -> Array:
 				dim = true
 		out.append(_entry(t, true, center, Vector2(hw, hh), 0.0, glow, dim, _deck_pos()))
 		x += hw
+	if drawn != null:
+		x += gap
+		var lifted_d := _selected_tile == drawn
+		var center_d := Vector2(x + hw * 0.5, hand_top + hh * 0.5 - (42.0 if lifted_d else 10.0))
+		var dim_d := _mode == "discard" and not _allowed.has(drawn)
+		out.append(_entry(drawn, true, center_d, Vector2(hw, hh), 0.0,
+			Color(1.0, 0.85, 0.3, 0.9 if lifted_d else 0.55), dim_d, _deck_pos()))
 	# 手牌上方：副露
 	var mw := hw * 0.62
 	var mh := mw * 1.42
@@ -456,10 +710,11 @@ func _on_discard_land(t: Tile, pos: Vector2, v: TileView) -> void:
 	_burst_at(pos, SUIT_COLORS[t.suit], 0.9)
 	Vfx.sparkle(_fx_layer, pos, SUIT_COLORS[t.suit].lightened(0.3), 12)
 	_shake(5.0)
+	_vibrate(14)
 	# 落地后稍等一下再报牌名，让撞击声先出现
 	var tw := create_tween()
 	tw.tween_interval(0.12)
-	tw.tween_callback(_sfx.speak_tile.bind(t.suit, t.rank))
+	tw.tween_callback(_sfx.speak_tile.bind(t.suit, t.rank, _discard_seat(t)))
 
 
 func _retire(key: Variant) -> void:
@@ -495,6 +750,7 @@ func _refresh_labels() -> void:
 		if p.missing_suit >= 0:
 			(chip.get_child(0) as Label).text = "缺" + Tile.SUIT_CHARS[p.missing_suit]
 			chip.add_theme_stylebox_override("panel", _chip_style(SUIT_COLORS[p.missing_suit]))
+	_update_hint()
 	_info.text = "第 %d/%d 局 · 庄家 %s · 余牌 %d" % [
 		_match.round_index, _match.total_rounds, _players[_round.dealer].display_name,
 		_round.wall.remaining()]
@@ -531,12 +787,12 @@ func _meld_call_name_cn(m: Meld) -> String:
 
 
 ## 牌旁边弹出的文字气泡（报牌/叫牌的可视化提示）
-func _bubble(pos: Vector2, text: String, color: Color) -> void:
+func _bubble(pos: Vector2, text: String, color: Color, font_size: int = 40) -> void:
 	var l := Label.new()
 	UiFont.apply_title(l)
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size", 40)
+	l.add_theme_font_size_override("font_size", font_size)
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	l.add_theme_constant_override("outline_size", 10)
@@ -570,7 +826,7 @@ func _celebrate(seat: int, self_drawn: bool) -> void:
 	var call := "zimo" if self_drawn else "hu"
 	var vt := create_tween()
 	vt.tween_interval(0.35)
-	vt.tween_callback(_sfx.speak_call.bind(call))
+	vt.tween_callback(_sfx.speak_call.bind(call, seat))
 	_flash_banner("%s %s！" % [_players[seat].display_name, "自摸" if self_drawn else "胡"], Color("ff8a80"))
 	_call_stamp("自摸" if self_drawn else "胡", Color("ff8a80"))
 	Vfx.confetti(_fx_layer, size.x)
@@ -579,6 +835,7 @@ func _celebrate(seat: int, self_drawn: bool) -> void:
 	tw.tween_property(_overlay, "color:a", 0.35, 0.12)
 	tw.tween_property(_overlay, "color:a", 0.0, 0.8)
 	_shake(10.0)
+	_vibrate(60)
 	var fw := _overlay.create_tween()
 	var w := size.x
 	var h := size.y
@@ -643,8 +900,15 @@ func _show_round_result() -> void:
 	v.add_theme_constant_override("separation", 12)
 	box.add_child(v)
 
+	var any_win := false
+	for p in _players:
+		if (p as Player).win_result != null:
+			any_win = true
 	var title := Label.new()
-	title.text = "流局" if _round.draw_game else "本局结束"
+	if _round.draw_game:
+		title.text = "牌墙摸完 · 本局结束" if any_win else "流局"
+	else:
+		title.text = "本局结束"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiFont.apply_title(title)
 	title.add_theme_font_size_override("font_size", 52)
@@ -669,13 +933,43 @@ func _show_round_result() -> void:
 		row.add_theme_font_size_override("font_size", 30)
 		row.add_theme_color_override("font_color", Color("2e7d32") if delta >= 0 else Color("c62828"))
 		v.add_child(row)
+	# 收付明细：谁给谁多少、因为什么
+	if not _payments.is_empty():
+		v.add_child(HSeparator.new())
+		var head := Label.new()
+		head.text = "本局收付"
+		head.add_theme_font_size_override("font_size", 24)
+		head.add_theme_color_override("font_color", Color("8d6e63"))
+		v.add_child(head)
+		var shown := 0
+		for tr in _payments:
+			if shown >= 12:
+				var more := Label.new()
+				more.text = "……"
+				more.add_theme_font_size_override("font_size", 20)
+				more.add_theme_color_override("font_color", Color("8d6e63"))
+				v.add_child(more)
+				break
+			shown += 1
+			var from_seat := int(tr["from"])
+			var to_seat := int(tr["to"])
+			var reason := "胡牌" if String(tr.get("reason", "")) == "win" else "杠分"
+			var line := Label.new()
+			line.text = "%s → %s    %d（%s）" % [
+				(_players[from_seat] as Player).display_name,
+				(_players[to_seat] as Player).display_name,
+				int(tr["amount"]), reason]
+			line.add_theme_font_size_override("font_size", 20)
+			line.add_theme_color_override("font_color", Color("4e342e"))
+			v.add_child(line)
 	var btn := _make_button("查看总结" if _match.is_over() else "下一局", Color("2e7d32"), 320)
-	btn.pressed.connect(func() -> void: _continue_pressed.emit())
+	btn.pressed.connect(_press_continue)
 	v.add_child(btn)
 	await _center_box(box)
 	_result_box = box
-	await _continue_pressed
-	box.queue_free()
+	await _wait_continue()
+	if is_instance_valid(box):
+		box.queue_free()
 	_result_box = null
 
 
@@ -703,11 +997,17 @@ func _show_final_result() -> void:
 		row.add_theme_color_override("font_color", Color("5d4037"))
 		v.add_child(row)
 		rank += 1
-	var again := _make_button("返回菜单", Color("2e7d32"), 320)
-	again.pressed.connect(func() -> void: exit_requested.emit())
-	v.add_child(again)
+	var replay := _make_button("再来一场", Color("2e7d32"), 320)
+	replay.pressed.connect(_request_restart)
+	v.add_child(replay)
+	var back := _make_button("返回菜单", Color("455a64"), 320)
+	back.pressed.connect(_request_exit)
+	v.add_child(back)
 	await _center_box(box)
-	await again.pressed
+	await _wait_continue()
+	if not _aborted and is_instance_valid(box):
+		box.queue_free()
+		exit_requested.emit()
 
 
 func _center_box(box: Control) -> void:
@@ -726,6 +1026,167 @@ func _panel_style(bg: Color, radius: int) -> StyleBoxFlat:
 	sb.shadow_color = Color(0, 0, 0, 0.45)
 	sb.shadow_size = 18
 	return sb
+
+
+# ============================ 暂停 / 退出 / 重开 ============================
+
+## 结算面板等“继续”。先置标记再 emit，这样中止发生在等待之前也不会漏掉
+func _press_continue() -> void:
+	_continue_flag = true
+	_continue_pressed.emit()
+
+
+func _wait_continue() -> void:
+	if _continue_flag:
+		_continue_flag = false
+		return
+	await _continue_pressed
+	_continue_flag = false
+
+
+func _build_pause_layer() -> void:
+	_pause_layer = Control.new()
+	_pause_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pause_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	_pause_layer.visible = false
+	add_child(_pause_layer)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.66)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pause_layer.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pause_layer.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", _panel_style(CREAM, 30))
+	center.add_child(panel)
+
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 14)
+	panel.add_child(v)
+
+	var title := Label.new()
+	title.text = "暂停"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiFont.apply_title(title)
+	title.add_theme_font_size_override("font_size", 56)
+	title.add_theme_color_override("font_color", Color("5d4037"))
+	v.add_child(title)
+
+	var resume := _make_button("继续游戏", Color("2e7d32"), 340)
+	resume.name = "ResumeButton"
+	resume.pressed.connect(_close_pause)
+	v.add_child(resume)
+
+	var settings_btn := _make_button("设置", Color("455a64"), 340)
+	settings_btn.pressed.connect(_open_settings_in_pause)
+	v.add_child(settings_btn)
+
+	var help_btn := _make_button("玩法", Color("6d4c41"), 340)
+	help_btn.pressed.connect(_open_help_in_pause)
+	v.add_child(help_btn)
+
+	var restart := _make_button("重新开始", Color("f9a825"), 340)
+	restart.pressed.connect(_request_restart)
+	v.add_child(restart)
+
+	var quit := _make_button("返回菜单", Color("b71c1c"), 340)
+	quit.pressed.connect(_request_exit)
+	v.add_child(quit)
+
+	var tip := Label.new()
+	tip.text = "本局进度不会保存"
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.add_theme_font_size_override("font_size", 20)
+	tip.add_theme_color_override("font_color", Color("8d6e63"))
+	v.add_child(tip)
+
+
+func _open_pause() -> void:
+	if _pause_layer == null or _pause_layer.visible:
+		return
+	if _round == null:
+		exit_requested.emit()
+		return
+	move_child(_pause_layer, get_child_count() - 1)
+	_pause_layer.visible = true
+	get_tree().paused = true
+	var resume := _pause_layer.find_child("ResumeButton", true, false) as Button
+	if resume != null:
+		resume.grab_focus()
+
+
+func _close_pause() -> void:
+	if _pause_layer == null:
+		return
+	_pause_layer.visible = false
+	get_tree().paused = false
+
+
+func _open_help_in_pause() -> void:
+	if has_node("PauseHelpView"):
+		return
+	var view := HelpView.new()
+	view.name = "PauseHelpView"
+	add_child(view)
+
+
+func _open_settings_in_pause() -> void:
+	if has_node("PauseSettingsView"):
+		return
+	Settings.load_settings()
+	var view := SettingsView.new()
+	view.name = "PauseSettingsView"
+	add_child(view)
+
+
+## 干净地结束本局：取消协程、唤醒挂起的等待，之后才真正释放牌桌
+func _abort_round() -> void:
+	if _aborted:
+		return
+	_aborted = true
+	if get_tree() != null:
+		get_tree().paused = false
+	_mode = ""
+	_selected_tile = null
+	_action_bar_clear()
+	if _round != null:
+		_round.cancel()
+	_press_continue()
+
+
+## 等本局协程真正退出（最多约 2 秒），避免牌桌被释放后还有回调打进来
+func _wait_round_stopped() -> void:
+	if _round == null:
+		return
+	var frames := 0
+	while _round.running and frames < 120:
+		frames += 1
+		await get_tree().process_frame
+	await get_tree().process_frame
+
+
+func _request_exit() -> void:
+	if _aborted:
+		return
+	_abort_round()
+	await _wait_round_stopped()
+	await get_tree().process_frame
+	exit_requested.emit()
+
+
+func _request_restart() -> void:
+	if _aborted:
+		return
+	_abort_round()
+	await _wait_round_stopped()
+	await get_tree().process_frame
+	restart_requested.emit(_rule_id, Settings.pace())
 
 
 # ============================ 界面搭建 ============================
@@ -773,6 +1234,16 @@ func _build_static_ui() -> void:
 	_info.add_theme_font_size_override("font_size", 22)
 	add_child(_info)
 
+	_hint = Label.new()
+	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_hint.add_theme_font_size_override("font_size", 26)
+	_hint.add_theme_color_override("font_color", GOLD)
+	_hint.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_hint.add_theme_constant_override("outline_size", 8)
+	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hint.visible = false
+	add_child(_hint)
+
 	for i in MahjongRule.PLAYER_COUNT:
 		var l := Label.new()
 		l.add_theme_font_size_override("font_size", 26)
@@ -793,7 +1264,7 @@ func _build_static_ui() -> void:
 	var menu_btn := _make_button("菜单", Color("455a64"), 110)
 	menu_btn.name = "MenuButton"
 	menu_btn.add_theme_font_size_override("font_size", 26)
-	menu_btn.pressed.connect(func() -> void: exit_requested.emit())
+	menu_btn.pressed.connect(_open_pause)
 	add_child(menu_btn)
 
 	_banner = Label.new()
@@ -819,6 +1290,7 @@ func _build_static_ui() -> void:
 
 	_sfx = Sfx.new()
 	add_child(_sfx)
+	_build_pause_layer()
 
 
 func _layout_static() -> void:
@@ -827,6 +1299,10 @@ func _layout_static() -> void:
 	_title.position = Vector2(24, 14)
 	_info.position = Vector2(24, 46)
 	_info.size = Vector2(700, 30)
+	var hw := minf(124.0, (w - 240.0) / 14.2)
+	var hh := hw * 1.42
+	_hint.position = Vector2(w - 620.0, h - hh - 118.0)
+	_hint.size = Vector2(580.0, 34.0)
 	var menu := find_child("MenuButton", false, false) as Control
 	if menu:
 		menu.position = Vector2(w - 130, 6)
