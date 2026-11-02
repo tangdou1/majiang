@@ -902,7 +902,7 @@ func _flash_banner(text: String, color: Color) -> void:
 
 func _show_round_result() -> void:
 	var box := PanelContainer.new()
-	box.custom_minimum_size = Vector2(760, 0)
+	box.custom_minimum_size = Vector2(760, 440)  # 固定高度：内容多时靠滚动查看，不挡住上方玩家手牌
 	box.add_theme_stylebox_override("panel", _panel_style(CREAM, 30))
 	add_child(box)
 	var v := VBoxContainer.new()
@@ -924,6 +924,16 @@ func _show_round_result() -> void:
 	title.add_theme_color_override("font_color", Color("5d4037"))
 	v.add_child(title)
 
+	# 结算内容区：可上下滑动查看，标题与按钮固定不动
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v.add_child(scroll)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 12)
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(content)
+
 	for p in _players:
 		var pl := p as Player
 		if pl.win_result != null:
@@ -932,8 +942,8 @@ func _show_round_result() -> void:
 			fl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			fl.add_theme_font_size_override("font_size", 24)
 			fl.add_theme_color_override("font_color", Color("b71c1c"))
-			v.add_child(fl)
-	v.add_child(HSeparator.new())
+			content.add_child(fl)
+	content.add_child(HSeparator.new())
 	for p in _players:
 		var pl := p as Player
 		var delta := pl.score - int(_scores_before[pl.seat])
@@ -941,15 +951,15 @@ func _show_round_result() -> void:
 		row.text = "%s    %+d    （累计 %d）" % [pl.display_name, delta, pl.score]
 		row.add_theme_font_size_override("font_size", 30)
 		row.add_theme_color_override("font_color", Color("2e7d32") if delta >= 0 else Color("c62828"))
-		v.add_child(row)
+		content.add_child(row)
 	# 收付明细：谁给谁多少、因为什么
 	if not _payments.is_empty():
-		v.add_child(HSeparator.new())
+		content.add_child(HSeparator.new())
 		var head := Label.new()
 		head.text = "本局收付"
 		head.add_theme_font_size_override("font_size", 24)
 		head.add_theme_color_override("font_color", Color("8d6e63"))
-		v.add_child(head)
+		content.add_child(head)
 		var shown := 0
 		for tr in _payments:
 			if shown >= 12:
@@ -957,7 +967,7 @@ func _show_round_result() -> void:
 				more.text = "……"
 				more.add_theme_font_size_override("font_size", 20)
 				more.add_theme_color_override("font_color", Color("8d6e63"))
-				v.add_child(more)
+				content.add_child(more)
 				break
 			shown += 1
 			var from_seat := int(tr["from"])
@@ -970,7 +980,7 @@ func _show_round_result() -> void:
 				int(tr["amount"]), reason]
 			line.add_theme_font_size_override("font_size", 20)
 			line.add_theme_color_override("font_color", Color("4e342e"))
-			v.add_child(line)
+			content.add_child(line)
 	var btn := _make_button("查看总结" if _match.is_over() else "下一局", Color("2e7d32"), 320)
 	btn.pressed.connect(_press_continue)
 	v.add_child(btn)
