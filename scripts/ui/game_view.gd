@@ -953,7 +953,8 @@ func _show_round_result() -> void:
 			shown += 1
 			var from_seat := int(tr["from"])
 			var to_seat := int(tr["to"])
-			var reason := "胡牌" if String(tr.get("reason", "")) == "win" else "杠分"
+			var reason_map := {"win": "胡牌", "kong": "杠分", "draw": "流局结算"}
+			var reason := reason_map.get(String(tr.get("reason", "")), "其他")
 			var line := Label.new()
 			line.text = "%s → %s    %d（%s）" % [
 				(_players[from_seat] as Player).display_name,
