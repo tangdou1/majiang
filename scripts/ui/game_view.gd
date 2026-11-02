@@ -387,7 +387,7 @@ func _waits_total(waits: Array, visible: PackedInt32Array) -> int:
 func _waits_text(waits: Array, visible: PackedInt32Array) -> String:
 	if waits.is_empty():
 		return ""
-	var names: Array[String] = []
+	var names := PackedStringArray()
 	var total := 0
 	for k in waits:
 		var left := maxi(0, 4 - visible[k])
@@ -450,10 +450,10 @@ func _update_hint() -> void:
 	for t in _human.hand.concealed:
 		ids += t.get_instance_id()
 	# key 包含 visible 的哈希值，当别人出牌/副露改变桌面可见牌时能实时更新“剩 X 张”
-	var key := "%d|%d|%d|%d|%d|%d|%d" % [_mode.hash(), int(_round.round_over),
+	var key := "%d|%d|%d|%d|%d|%d|%d" % [hash(_mode), int(_round.round_over),
 		_human.hand.concealed.size(), ids,
 		_selected_tile.get_instance_id() if _selected_tile != null else 0, int(_human.finished),
-		visible.hash()]
+		hash(visible)]
 	if key == _hint_key:
 		return
 	_hint_key = key
