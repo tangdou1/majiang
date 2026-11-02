@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 对照实验（这一步应当失败）
+        run: exit 1
+
       - name: 安装 Godot 4.7.2
         run: |
           curl -sSL -o godot.zip \
