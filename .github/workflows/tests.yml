@@ -12,9 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 对照实验（这一步应当失败）
-        run: exit 1
-
       - name: 安装 Godot 4.7.2
         run: |
           curl -sSL -o godot.zip \
@@ -22,13 +19,20 @@ jobs:
           unzip -q godot.zip
           mv Godot_v4.7.2-stable_linux.x86_64 godot
           chmod +x godot
-          ./godot --version
+          ./godot --version | tee /tmp/version.log
+          echo "::notice title=Godot 版本::$(head -1 /tmp/version.log)"
 
       - name: 导入资源（字体 / 音频）
-        run: ./godot --headless --path . --import
+        run: ./godot --headless --path . --import 2>&1 | tee /tmp/import.log
 
       - name: core 逻辑测试
-        run: ./godot --headless --path . --script res://tests/run_tests.gd
+        run: |
+          set -o pipefail
+          ./godot --headless --path . --script res://tests/run_tests.gd 2>&1 | tee /tmp/core.log
+          echo "::notice title=core 逻辑测试::$(grep -E '全部通过|失败 [0-9]+|一局打完' /tmp/core.log | tr '\n' ' ' | cut -c1-900)"
 
       - name: 界面冒烟测试
-        run: ./godot --headless --path . --script res://tests/ui_smoke.gd
+        run: |
+          set -o pipefail
+          ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee /tmp/ui.log
+          echo "::notice title=界面冒烟测试::$(grep -E '通过|失败|SMOKE|标记' /tmp/ui.log | tr '\n' ' ' | cut -c1-900)"
