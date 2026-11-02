@@ -32,13 +32,14 @@ static func _fade_ramp(color: Color) -> Gradient:
 ## 选牌火花：牌被抬起时向四周散开的小光点
 ## flat = true 时按桌面视角铺开（横向散开、上抛更少），用于打牌落地的火花
 static func sparkle(parent: Node, pos: Vector2, color: Color, amount: int = 18, flat: bool = false) -> void:
+	var light := Settings.reduced_motion
 	var p := CPUParticles2D.new()
 	p.position = pos
 	p.texture = dot()
 	p.one_shot = true
 	p.explosiveness = 0.85
-	p.amount = amount
-	p.lifetime = 0.7
+	p.amount = maxi(3, roundi(amount * 0.25)) if light else amount
+	p.lifetime = 0.4 if light else 0.7
 	p.spread = 180.0
 	p.initial_velocity_min = 110.0
 	p.initial_velocity_max = 260.0
@@ -51,14 +52,23 @@ static func sparkle(parent: Node, pos: Vector2, color: Color, amount: int = 18, 
 		p.gravity = Vector2(0, 150)
 	p.scale_amount_min = 0.12
 	p.scale_amount_max = 0.3
-	p.color_ramp = _fade_ramp(UiTheme.hot(color, 1.9))
+	if light:
+		p.initial_velocity_min *= 0.35
+		p.initial_velocity_max *= 0.35
+		p.gravity *= 0.35
+		p.scale_amount_min *= 0.65
+		p.scale_amount_max *= 0.65
+	var spark_color := Color(color, color.a * 0.55) if light else UiTheme.hot(color, 1.9)
+	p.color_ramp = _fade_ramp(spark_color)
 	p.emitting = true
 	parent.add_child(p)
-	Fx.get_tree_safe_free(p, 1.2, parent)
+	Fx.get_tree_safe_free(p, 1.2)
 
 
 ## 叫牌放射光线：一圈旋转渐隐的光芒
 static func rays(parent: Node, pos: Vector2, color: Color, radius: float) -> void:
+	if Settings.reduced_motion:
+		return
 	var c := Control.new()
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	c.size = Vector2(radius * 2.0, radius * 2.0)
@@ -85,6 +95,8 @@ static func rays(parent: Node, pos: Vector2, color: Color, radius: float) -> voi
 
 ## 胡牌彩纸：从屏幕顶部落下的多色纸片
 static func confetti(parent: Node, width: float) -> void:
+	if Settings.reduced_motion:
+		return
 	var colors := [Color("ffd54f"), Color("ef5350"), Color("42a5f5"), Color("66bb6a"), Color("ffffff")]
 	for col: Color in colors:
 		var p := CPUParticles2D.new()
@@ -109,7 +121,7 @@ static func confetti(parent: Node, width: float) -> void:
 		p.color = col
 		p.emitting = true
 		parent.add_child(p)
-		Fx.get_tree_safe_free(p, 5.0, parent)
+		Fx.get_tree_safe_free(p, 5.0)
 
 
 ## 牌桌漂浮光点：常驻、缓慢上升，给桌面增加氛围（需要自行设置 position 与 emission_rect_extents）
@@ -129,5 +141,12 @@ static func ambient() -> CPUParticles2D:
 	p.scale_amount_max = 0.22
 	p.color = UiTheme.hot(Color(1.0, 0.92, 0.65, 0.32), 1.35)
 	p.z_index = -1
-	p.emitting = true
+	apply_ambient_setting(p)
 	return p
+
+
+## 常驻粒子也即时响应设置；关闭时连残留光点一起隐藏，并停止 CPU 更新。
+static func apply_ambient_setting(p: CPUParticles2D) -> void:
+	p.emitting = not Settings.reduced_motion
+	p.visible = not Settings.reduced_motion
+	p.process_mode = Node.PROCESS_MODE_DISABLED if Settings.reduced_motion else Node.PROCESS_MODE_PAUSABLE

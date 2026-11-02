@@ -1,9 +1,10 @@
 class_name SettingsView
 extends Control
-## 设置面板：出牌节奏、音效音量、人声音量、静音。
+## 设置面板：出牌节奏、音效音量、人声音量、静音、轻动效。
 ## 改动立即生效并写入 user://settings.cfg；面板本身由调用方添加/释放。
 
 signal closed
+signal effects_changed
 
 const TEXT := UiTheme.INK
 const SUB := UiTheme.INK_MUTED
@@ -92,6 +93,19 @@ func _build() -> void:
 	mute.toggled.connect(_on_mute)
 	v.add_child(mute)
 
+	var light_effects := CheckButton.new()
+	light_effects.name = "ReducedMotionToggle"
+	light_effects.text = "轻动效"
+	light_effects.custom_minimum_size.y = 56
+	light_effects.button_pressed = Settings.reduced_motion
+	light_effects.add_theme_font_size_override("font_size", 28)
+	_set_check_text_color(light_effects)
+	light_effects.toggled.connect(_on_reduced_motion)
+	v.add_child(light_effects)
+	var effects_tip := _section("关闭震屏与全屏闪光，减少粒子；保留出牌与叫牌提示。")
+	effects_tip.add_theme_font_size_override("font_size", 22)
+	v.add_child(effects_tip)
+
 	var done := _button("完成", 240, 72)
 	done.add_theme_font_size_override("font_size", 32)
 	done.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -173,6 +187,12 @@ func _refresh_value_labels() -> void:
 func _on_mute(on: bool) -> void:
 	Settings.muted = on
 	Settings.save_settings()
+
+
+func _on_reduced_motion(on: bool) -> void:
+	Settings.reduced_motion = on
+	Settings.save_settings()
+	effects_changed.emit()
 
 
 ## CheckButton 在按下、悬停等状态会使用不同的主题文字颜色。
