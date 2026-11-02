@@ -1,36 +1,15 @@
 extends Control
 ## 应用入口：安装中文字体，在菜单与牌桌之间切换。
 
-const BGM_PATH := "res://assets/bgm/table.ogg"
-
 var _menu: MenuView = null
 var _game: GameView = null
-var _music: AudioStreamPlayer = null
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	Settings.load_settings()
 	_install_font()
-	_start_music()
 	_show_menu()
-
-
-## 牌桌背景音乐：整场常驻（菜单/牌桌共用），循环播放，音量走独立 Music 总线
-func _start_music() -> void:
-	if not ResourceLoader.exists(BGM_PATH):
-		return
-	var stream: AudioStream = load(BGM_PATH)
-	if stream == null:
-		return
-	if stream is AudioStreamOggVorbis:
-		(stream as AudioStreamOggVorbis).loop = true
-	_music = AudioStreamPlayer.new()
-	_music.stream = stream
-	_music.bus = Settings.BUS_MUSIC
-	_music.volume_db = -3.0
-	add_child(_music)
-	_music.play()
 
 
 ## 全局正文字体（思源黑体 SC，字重 500）；标题字体见 UiFont

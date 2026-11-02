@@ -4,18 +4,10 @@ extends Control
 
 signal start_requested(rule_id: String, pace: float)
 
-var _sfx: Sfx = null
-
-static var _tutorial_shown: bool = false   ## 每次启动只在第一次进菜单时自动弹一次
-
-
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	Settings.load_settings()
 	_build()
-	if Settings.show_tutorial and not _tutorial_shown:
-		_tutorial_shown = true
-		_open_help.call_deferred()
 
 
 func _draw() -> void:
@@ -100,11 +92,6 @@ func _build() -> void:
 	var tools := HBoxContainer.new()
 	tools.add_theme_constant_override("separation", 12)
 	v.add_child(tools)
-	var listen := _button("试听人声", Color("5d4037"), 190)
-	listen.add_theme_font_size_override("font_size", 26)
-	listen.custom_minimum_size = Vector2(190, 64)
-	listen.pressed.connect(_play_sample)
-	tools.add_child(listen)
 	var help_btn := _button("玩法", Color("6d4c41"), 110)
 	help_btn.add_theme_font_size_override("font_size", 26)
 	help_btn.custom_minimum_size = Vector2(110, 64)
@@ -140,19 +127,6 @@ func _open_settings() -> void:
 	var view := SettingsView.new()
 	view.name = "SettingsView"
 	add_child(view)
-
-
-## 试听：报牌 + 叫牌（用于确认手机的声音输出）
-func _play_sample() -> void:
-	if _sfx == null:
-		_sfx = Sfx.new()
-		add_child(_sfx)
-	_sfx.speak_tile(0, 2)
-	var tw := create_tween()
-	tw.tween_interval(0.9)
-	tw.tween_callback(_sfx.speak_tile.bind(1, 3))
-	tw.tween_interval(0.9)
-	tw.tween_callback(_sfx.speak_call.bind("peng"))
 
 
 func _button(text: String, color: Color, min_w: int) -> Button:

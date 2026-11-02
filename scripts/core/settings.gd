@@ -7,7 +7,6 @@ const PATH := "user://settings.cfg"
 
 const BUS_SFX := "SFX"
 const BUS_VOICE := "Voice"
-const BUS_MUSIC := "Music"
 
 ## 出牌节奏（秒）：快 / 中 / 慢
 const PACE_VALUES := [0.22, 0.42, 0.7]
@@ -16,10 +15,8 @@ const PACE_NAMES := ["快", "中", "慢"]
 static var pace_index: int = 2
 static var sfx_volume: float = 0.9
 static var voice_volume: float = 1.0
-static var music_volume: float = 0.6
 static var muted: bool = false
 static var vibrate: bool = true
-static var show_tutorial: bool = true
 
 static var _loaded: bool = false
 
@@ -43,9 +40,7 @@ static func load_settings() -> void:
 		vibrate = bool(cfg.get_value("game", "vibrate", vibrate))
 		sfx_volume = clampf(float(cfg.get_value("audio", "sfx_volume", sfx_volume)), 0.0, 1.0)
 		voice_volume = clampf(float(cfg.get_value("audio", "voice_volume", voice_volume)), 0.0, 1.0)
-		music_volume = clampf(float(cfg.get_value("audio", "music_volume", music_volume)), 0.0, 1.0)
 		muted = bool(cfg.get_value("audio", "muted", muted))
-		show_tutorial = bool(cfg.get_value("game", "show_tutorial", show_tutorial))
 	apply_audio()
 
 
@@ -53,10 +48,8 @@ static func save_settings() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("game", "pace_index", pace_index)
 	cfg.set_value("game", "vibrate", vibrate)
-	cfg.set_value("game", "show_tutorial", show_tutorial)
 	cfg.set_value("audio", "sfx_volume", sfx_volume)
 	cfg.set_value("audio", "voice_volume", voice_volume)
-	cfg.set_value("audio", "music_volume", music_volume)
 	cfg.set_value("audio", "muted", muted)
 	cfg.save(PATH)
 	apply_audio()
@@ -66,13 +59,10 @@ static func save_settings() -> void:
 static func apply_audio() -> void:
 	var sfx := _ensure_bus(BUS_SFX)
 	var voice := _ensure_bus(BUS_VOICE)
-	var music := _ensure_bus(BUS_MUSIC)
 	AudioServer.set_bus_volume_db(sfx, linear_to_db(maxf(sfx_volume, 0.001)))
 	AudioServer.set_bus_volume_db(voice, linear_to_db(maxf(voice_volume, 0.001)))
-	AudioServer.set_bus_volume_db(music, linear_to_db(maxf(music_volume, 0.001)))
 	AudioServer.set_bus_mute(sfx, muted)
 	AudioServer.set_bus_mute(voice, muted)
-	AudioServer.set_bus_mute(music, muted)
 
 
 ## 找到总线，没有就新建（发送到 Master）
