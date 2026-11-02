@@ -61,7 +61,9 @@ func _draw() -> void:
 	var rect := Rect2(Vector2.ZERO, size)
 	if glow.a > 0.01:
 		var g := StyleBoxFlat.new()
-		g.bg_color = Color(glow.r, glow.g, glow.b, glow.a * 0.35)
+		# 推到 HDR 亮度，让选中/最新打出这张牌的描边真正“亮”起来（见 Glow）
+		var halo := UiTheme.hot(glow, 1.9)
+		g.bg_color = Color(halo.r, halo.g, halo.b, glow.a * 0.35)
 		g.set_corner_radius_all(int(w * 0.2))
 		var pad := w * 0.12
 		draw_style_box(g, Rect2(-pad, -pad, w + pad * 2, h + pad * 2))
@@ -72,10 +74,16 @@ func _draw() -> void:
 	sb.set_border_width_all(maxi(1, int(w * 0.03)))
 	sb.border_width_bottom = int(w * 0.1)
 	sb.set_corner_radius_all(int(w * 0.12))
+	# 阴影方向与全场景统一：光从左上来，投影落右下（UiTheme.SHADOW_DIR）
 	sb.shadow_color = Color(0, 0, 0, 0.4)
 	sb.shadow_size = int(w * 0.12)
-	sb.shadow_offset = Vector2(0, w * 0.05)
+	sb.shadow_offset = UiTheme.lift_offset(w * 0.12)
 	draw_style_box(sb, rect)
+
+	# 顶边受光：一条极淡高光压在上边框内侧，和阴影方向自洽
+	var bevel := Color(1, 1, 1, 0.16 if face_down else 0.45)
+	draw_line(Vector2(w * 0.16, maxf(1.5, w * 0.035)), Vector2(w - w * 0.16, maxf(1.5, w * 0.035)),
+		bevel, maxf(1.0, w * 0.018), true)
 
 	if face_down:
 		_draw_back(w, h)

@@ -44,7 +44,7 @@ static func sparkle(parent: Node, pos: Vector2, color: Color, amount: int = 18) 
 	p.gravity = Vector2(0, 340)
 	p.scale_amount_min = 0.12
 	p.scale_amount_max = 0.3
-	p.color_ramp = _fade_ramp(color)
+	p.color_ramp = _fade_ramp(UiTheme.hot(color, 1.9))
 	p.emitting = true
 	parent.add_child(p)
 	Fx.get_tree_safe_free(p, 1.2, parent)
@@ -64,9 +64,10 @@ static func rays(parent: Node, pos: Vector2, color: Color, radius: float) -> voi
 		for i in n:
 			var a := TAU * float(i) / n
 			var a2 := a + TAU / (n * 2.0) * 0.5
-			var col := Color(color.r, color.g, color.b, 0.26)
+			var hcol := UiTheme.hot(color, 1.5)
+			var col := Color(hcol.r, hcol.g, hcol.b, 0.26)
 			c.draw_colored_polygon(PackedVector2Array([ctr, ctr + Vector2.from_angle(a) * radius, ctr + Vector2.from_angle(a2) * radius]), col)
-		c.draw_circle(ctr, radius * 0.22, Color(1, 1, 1, 0.35)))
+		c.draw_circle(ctr, radius * 0.22, UiTheme.hot(Color(1, 1, 1, 0.35), 2.0)))
 	parent.add_child(c)
 	var tw := c.create_tween().set_parallel(true)
 	tw.tween_property(c, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -119,7 +120,7 @@ static func ambient() -> CPUParticles2D:
 	p.gravity = Vector2.ZERO
 	p.scale_amount_min = 0.08
 	p.scale_amount_max = 0.22
-	p.color = Color(1.0, 0.92, 0.65, 0.32)
+	p.color = UiTheme.hot(Color(1.0, 0.92, 0.65, 0.32), 1.35)
 	p.z_index = -1
 	p.emitting = true
 	return p

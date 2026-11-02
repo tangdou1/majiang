@@ -9,6 +9,10 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	Settings.load_settings()
 	_install_font()
+	# 统一设计令牌：字号阶梯与滚动条外观由主题给出，配色/圆角/阴影走 UiTheme 工厂
+	theme = UiTheme.build()
+	# 全屏泛光：整个视口共享一个 Environment，菜单与牌桌都吃到
+	Glow.install(self)
 	_show_menu()
 
 

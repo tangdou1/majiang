@@ -27,3 +27,5 @@ window/stretch/aspect="expand"
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+; HDR 2D：颜色值可超过 1.0，glow 后处理才能拾取到（见 scripts/ui/glow.gd）
+viewport/hdr_2d=true

@@ -11,9 +11,11 @@ signal restart_requested(rule_id: String, pace: float)
 signal _continue_pressed
 
 const HUMAN_NAME := "你"
-const GOLD := Color("ffd54f")
-const CREAM := Color("fff8e7")
-const SUIT_COLORS := [Color("ef5350"), Color("42a5f5"), Color("66bb6a")]
+## 颜色一律来自 UiTheme 设计令牌，界面之间不再各自写十六进制
+const GOLD := UiTheme.GOLD
+const CREAM := UiTheme.CREAM
+## 三门花色（万 / 筒 / 条）。用 static var 而非 const：跨类常量数组的编译期求值不够稳妥
+static var SUIT_COLORS: Array = UiTheme.SUIT
 
 var rule: MahjongRule
 var _match: MatchController
@@ -207,11 +209,11 @@ func _on_human_awaiting(kind: String, payload: Variant) -> void:
 func _show_options(options: Array, phase: String) -> void:
 	_action_bar_prompt("自摸阶段：胡 / 杠" if phase == "self" else "要碰、杠或胡吗？")
 	for opt in options:
-		var color := Color("d32f2f") if opt["action"] == "hu" else Color("f9a825")
+		var color := UiTheme.ACCENT_RED if opt["action"] == "hu" else UiTheme.WARN
 		var b := _make_button(_option_text(opt, phase), color, 150)
 		b.pressed.connect(func() -> void: _choose(opt))
 		_action_bar.add_child(b)
-	var pass_btn := _make_button("过", Color("546e7a"), 120)
+	var pass_btn := _make_button("过", UiTheme.GREY, 120)
 	pass_btn.pressed.connect(func() -> void: _choose(null))
 	_action_bar.add_child(pass_btn)
 
@@ -279,7 +281,7 @@ func _on_tile_tapped(view: TileView) -> void:
 	if _mode != "discard" or view.tile == null:
 		return
 	if not _allowed.has(view.tile):
-		_flash_banner("这张牌现在不能打", Color("ff8a80"))
+		_flash_banner("这张牌现在不能打", UiTheme.HU)
 		_shake(3.0)
 		return
 	# 点击反馈：轻微下压
@@ -837,8 +839,8 @@ func _celebrate(seat: int, self_drawn: bool) -> void:
 	var vt := create_tween()
 	vt.tween_interval(0.35)
 	vt.tween_callback(_sfx.speak_call.bind(call, seat))
-	_flash_banner("%s %s！" % [_players[seat].display_name, "自摸" if self_drawn else "胡"], Color("ff8a80"))
-	_call_stamp("自摸" if self_drawn else "胡", Color("ff8a80"))
+	_flash_banner("%s %s！" % [_players[seat].display_name, "自摸" if self_drawn else "胡"], UiTheme.HU)
+	_call_stamp("自摸" if self_drawn else "胡", UiTheme.HU)
 	Vfx.confetti(_fx_layer, size.x)
 	_overlay.color = Color(1.0, 0.85, 0.3, 0.0)
 	var tw := _overlay.create_tween()
@@ -867,7 +869,7 @@ func _call_stamp(text: String, color: Color) -> void:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.add_theme_font_size_override("font_size", 170)
-	l.add_theme_color_override("font_color", color.lightened(0.25))
+	l.add_theme_color_override("font_color", UiTheme.hot(color.lightened(0.25), 1.9))
 	l.add_theme_color_override("font_outline_color", Color(0.25, 0.05, 0.0, 0.95))
 	l.add_theme_constant_override("outline_size", 22)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -889,7 +891,7 @@ func _call_stamp(text: String, color: Color) -> void:
 
 func _flash_banner(text: String, color: Color) -> void:
 	_banner.text = text
-	_banner.add_theme_color_override("font_color", color)
+	_banner.add_theme_color_override("font_color", UiTheme.hot(color, 1.45))
 	_banner.modulate.a = 1.0
 	_banner.scale = Vector2(0.5, 0.5)
 	var tw := create_tween()
@@ -921,7 +923,7 @@ func _show_round_result() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiFont.apply_title(title)
 	title.add_theme_font_size_override("font_size", 52)
-	title.add_theme_color_override("font_color", Color("5d4037"))
+	title.add_theme_color_override("font_color", UiTheme.INK)
 	v.add_child(title)
 
 	# 结算内容区：可上下滑动查看，标题与按钮固定不动
@@ -941,7 +943,7 @@ func _show_round_result() -> void:
 			fl.text = "%s：%s" % [pl.display_name, pl.win_result.summary()]
 			fl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			fl.add_theme_font_size_override("font_size", 24)
-			fl.add_theme_color_override("font_color", Color("b71c1c"))
+			fl.add_theme_color_override("font_color", UiTheme.DANGER)
 			content.add_child(fl)
 	content.add_child(HSeparator.new())
 	for p in _players:
@@ -950,7 +952,7 @@ func _show_round_result() -> void:
 		var row := Label.new()
 		row.text = "%s    %+d    （累计 %d）" % [pl.display_name, delta, pl.score]
 		row.add_theme_font_size_override("font_size", 30)
-		row.add_theme_color_override("font_color", Color("2e7d32") if delta >= 0 else Color("c62828"))
+		row.add_theme_color_override("font_color", UiTheme.GREEN if delta >= 0 else UiTheme.NEG)
 		content.add_child(row)
 	# 收付明细：谁给谁多少、因为什么
 	if not _payments.is_empty():
@@ -958,7 +960,7 @@ func _show_round_result() -> void:
 		var head := Label.new()
 		head.text = "本局收付"
 		head.add_theme_font_size_override("font_size", 24)
-		head.add_theme_color_override("font_color", Color("8d6e63"))
+		head.add_theme_color_override("font_color", UiTheme.INK_MUTED)
 		content.add_child(head)
 		var shown := 0
 		for tr in _payments:
@@ -966,7 +968,7 @@ func _show_round_result() -> void:
 				var more := Label.new()
 				more.text = "……"
 				more.add_theme_font_size_override("font_size", 20)
-				more.add_theme_color_override("font_color", Color("8d6e63"))
+				more.add_theme_color_override("font_color", UiTheme.INK_MUTED)
 				content.add_child(more)
 				break
 			shown += 1
@@ -979,9 +981,9 @@ func _show_round_result() -> void:
 				(_players[to_seat] as Player).display_name,
 				int(tr["amount"]), reason]
 			line.add_theme_font_size_override("font_size", 20)
-			line.add_theme_color_override("font_color", Color("4e342e"))
+			line.add_theme_color_override("font_color", UiTheme.INK_BODY)
 			content.add_child(line)
-	var btn := _make_button("查看总结" if _match.is_over() else "下一局", Color("2e7d32"), 320)
+	var btn := _make_button("查看总结" if _match.is_over() else "下一局", UiTheme.GREEN, 320)
 	btn.pressed.connect(_press_continue)
 	v.add_child(btn)
 	await _center_box(box)
@@ -1005,7 +1007,7 @@ func _show_final_result() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiFont.apply_title(title)
 	title.add_theme_font_size_override("font_size", 60)
-	title.add_theme_color_override("font_color", Color("5d4037"))
+	title.add_theme_color_override("font_color", UiTheme.INK)
 	v.add_child(title)
 	var rank := 1
 	for p in _match.ranking():
@@ -1013,13 +1015,13 @@ func _show_final_result() -> void:
 		var row := Label.new()
 		row.text = "第 %d 名    %s    %d 分" % [rank, pl.display_name, pl.score]
 		row.add_theme_font_size_override("font_size", 36)
-		row.add_theme_color_override("font_color", Color("5d4037"))
+		row.add_theme_color_override("font_color", UiTheme.INK)
 		v.add_child(row)
 		rank += 1
-	var replay := _make_button("再来一场", Color("2e7d32"), 320)
+	var replay := _make_button("再来一场", UiTheme.GREEN, 320)
 	replay.pressed.connect(_request_restart)
 	v.add_child(replay)
-	var back := _make_button("返回菜单", Color("455a64"), 320)
+	var back := _make_button("返回菜单", UiTheme.SLATE, 320)
 	back.pressed.connect(_request_exit)
 	v.add_child(back)
 	await _center_box(box)
@@ -1035,16 +1037,7 @@ func _center_box(box: Control) -> void:
 
 
 func _panel_style(bg: Color, radius: int) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = bg
-	sb.set_corner_radius_all(radius)
-	sb.content_margin_left = 34
-	sb.content_margin_right = 34
-	sb.content_margin_top = 28
-	sb.content_margin_bottom = 28
-	sb.shadow_color = Color(0, 0, 0, 0.45)
-	sb.shadow_size = 18
-	return sb
+	return UiTheme.panel_style(bg, radius, 34, 28)
 
 
 # ============================ 暂停 / 退出 / 重开 ============================
@@ -1094,27 +1087,27 @@ func _build_pause_layer() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiFont.apply_title(title)
 	title.add_theme_font_size_override("font_size", 56)
-	title.add_theme_color_override("font_color", Color("5d4037"))
+	title.add_theme_color_override("font_color", UiTheme.INK)
 	v.add_child(title)
 
-	var resume := _make_button("继续游戏", Color("2e7d32"), 340)
+	var resume := _make_button("继续游戏", UiTheme.GREEN, 340)
 	resume.name = "ResumeButton"
 	resume.pressed.connect(_close_pause)
 	v.add_child(resume)
 
-	var settings_btn := _make_button("设置", Color("455a64"), 340)
+	var settings_btn := _make_button("设置", UiTheme.SLATE, 340)
 	settings_btn.pressed.connect(_open_settings_in_pause)
 	v.add_child(settings_btn)
 
-	var help_btn := _make_button("玩法", Color("6d4c41"), 340)
+	var help_btn := _make_button("玩法", UiTheme.BROWN, 340)
 	help_btn.pressed.connect(_open_help_in_pause)
 	v.add_child(help_btn)
 
-	var restart := _make_button("重新开始", Color("f9a825"), 340)
+	var restart := _make_button("重新开始", UiTheme.WARN, 340)
 	restart.pressed.connect(_request_restart)
 	v.add_child(restart)
 
-	var quit := _make_button("返回菜单", Color("b71c1c"), 340)
+	var quit := _make_button("返回菜单", UiTheme.DANGER, 340)
 	quit.pressed.connect(_request_exit)
 	v.add_child(quit)
 
@@ -1122,7 +1115,7 @@ func _build_pause_layer() -> void:
 	tip.text = "本局进度不会保存"
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tip.add_theme_font_size_override("font_size", 20)
-	tip.add_theme_color_override("font_color", Color("8d6e63"))
+	tip.add_theme_color_override("font_color", UiTheme.INK_MUTED)
 	v.add_child(tip)
 
 
@@ -1256,14 +1249,14 @@ func _build_static_ui() -> void:
 
 	_info = Label.new()
 	_info.add_theme_font_size_override("font_size", 24)
-	_info.add_theme_color_override("font_color", Color("c8e6c9"))
+	_info.add_theme_color_override("font_color", UiTheme.ON_FELT)
 	_info.add_theme_font_size_override("font_size", 22)
 	add_child(_info)
 
 	_hint = Label.new()
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_hint.add_theme_font_size_override("font_size", 26)
-	_hint.add_theme_color_override("font_color", GOLD)
+	_hint.add_theme_color_override("font_color", UiTheme.hot(GOLD, 1.35))
 	_hint.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	_hint.add_theme_constant_override("outline_size", 8)
 	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1288,7 +1281,7 @@ func _build_static_ui() -> void:
 		add_child(chip)
 		_chips.append(chip)
 
-	var menu_btn := _make_button("菜单", Color("455a64"), 110)
+	var menu_btn := _make_button("菜单", UiTheme.SLATE, 110)
 	menu_btn.name = "MenuButton"
 	menu_btn.add_theme_font_size_override("font_size", 26)
 	menu_btn.pressed.connect(_open_pause)
@@ -1362,16 +1355,7 @@ func _on_resized() -> void:
 
 
 func _chip_style(color: Color) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = color.darkened(0.1)
-	sb.set_corner_radius_all(12)
-	sb.content_margin_left = 12
-	sb.content_margin_right = 12
-	sb.content_margin_top = 2
-	sb.content_margin_bottom = 2
-	sb.border_color = Color(1, 1, 1, 0.5)
-	sb.set_border_width_all(2)
-	return sb
+	return UiTheme.chip_style(color)
 
 
 func _action_bar_clear() -> void:
@@ -1392,22 +1376,7 @@ func _action_bar_prompt(text: String) -> void:
 
 
 func _make_button(text: String, color: Color, min_w: int) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(min_w, 80)
-	b.add_theme_font_size_override("font_size", 34)
-	b.add_theme_color_override("font_color", Color.WHITE)
-	for state in ["normal", "hover", "pressed", "focus"]:
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = color.darkened(0.15) if state == "pressed" else color
-		sb.set_corner_radius_all(20)
-		sb.content_margin_left = 20
-		sb.content_margin_right = 20
-		sb.shadow_color = Color(0, 0, 0, 0.35)
-		sb.shadow_size = 6
-		sb.shadow_offset = Vector2(0, 4)
-		b.add_theme_stylebox_override(state, sb)
-	return b
+	return UiTheme.make_button(text, color, min_w, 80, UiTheme.FS_BTN_LARGE)
 
 
 func _vignette_texture() -> GradientTexture2D:
@@ -1428,23 +1397,28 @@ func _draw() -> void:
 	var w := size.x
 	var h := size.y
 	# 1) 深色木质桌框
-	draw_rect(Rect2(Vector2.ZERO, size), Color("2a170c"))
+	draw_rect(Rect2(Vector2.ZERO, size), UiTheme.WOOD)
 	for i in 60:
 		var y := h * float(i) / 60.0
 		draw_line(Vector2(0, y), Vector2(w, y), Color(0.45, 0.28, 0.14, 0.18 if i % 2 == 0 else 0.07), 2.0)
 	draw_rect(Rect2(0, 0, w, 10), Color(0.8, 0.6, 0.35, 0.25))
 	draw_rect(Rect2(0, h - 10, w, 10), Color(0, 0, 0, 0.45))
 	# 2) 毡布面：纵向渐变 + 中心光晕 + 细微纹理
+	# 色阶做密一点：60 段在 1080p 上能看出横向色带，加到 160 段后看不见台阶
 	var m := 26.0
 	var felt := Rect2(m, m, w - m * 2, h - m * 2)
-	var steps := 60
+	var steps := 160
 	for i in steps:
 		var t := float(i) / steps
 		draw_rect(Rect2(felt.position.x, felt.position.y + felt.size.y * t, felt.size.x, felt.size.y / steps + 1),
-			Color("17653f").lerp(Color("0b3d27"), t))
+			UiTheme.FELT_TOP.lerp(UiTheme.FELT_BOTTOM, t))
+	# 光心固定在左上（与牌面高光、所有阴影方向一致），右下补一层很淡的接触阴影
 	var center := Vector2(w * 0.5, h * 0.5)
+	var light_c := Vector2(w * 0.44, h * 0.40)
 	for k in 14:
-		draw_circle(center, (w * 0.62) - k * 52.0, Color(0.45, 0.95, 0.65, 0.018))
+		draw_circle(light_c, (w * 0.60) - k * 52.0, Color(0.45, 0.95, 0.65, 0.018))
+	for k in 10:
+		draw_circle(Vector2(w * 0.70, h * 0.76), (w * 0.46) - k * 58.0, Color(0.0, 0.06, 0.03, 0.014))
 	for k in 260:
 		var px := felt.position.x + fmod(float(k) * 97.31, felt.size.x)
 		var py := felt.position.y + fmod(float(k) * 53.17, felt.size.y)
@@ -1453,8 +1427,8 @@ func _draw() -> void:
 	draw_rect(felt.grow(-10), Color(0.95, 0.8, 0.45, 0.45), false, 3.0)
 	draw_rect(felt.grow(-16), Color(0.95, 0.8, 0.45, 0.15), false, 1.0)
 	for c in [felt.position, felt.position + Vector2(felt.size.x, 0), felt.position + Vector2(0, felt.size.y), felt.end]:
-		draw_circle(c, 9.0, Color("e8c170"))
-		draw_circle(c, 4.0, Color("2a170c"))
+		draw_circle(c, 9.0, UiTheme.BRASS)
+		draw_circle(c, 4.0, UiTheme.WOOD)
 	# 4) 中心水印
 	var font := UiFont.title()
 	var wm := "血 战 到 底"
