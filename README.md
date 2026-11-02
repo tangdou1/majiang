@@ -4,6 +4,8 @@ Godot 4.7 单机四川麻将，横屏手机版（1920×1080 设计，手牌沿�
 
 ![游戏截图](screenshot.png)
 
+[![tests](https://github.com/tangdou1/majiang/actions/workflows/tests.yml/badge.svg)](https://github.com/tangdou1/majiang/actions/workflows/tests.yml)
+
 ## 功能
 - 四川麻将（血战到底）：开局定缺、只能碰/杠/胡（无吃；和牌可含自摸形成的顺子，即平胡；另有碰碰胡、七对）、一人和牌后其余人继续直到牌摸完、杠牌即时收分
 - 三个对手 AI（基于向听数，难度随机化），每局随机生成真实感的中文昵称
@@ -28,6 +30,9 @@ Godot 4.7 单机四川麻将，横屏手机版（1920×1080 设计，手牌沿�
 - 牌桌：木质桌框、毡布光晕与纹理、金色描边；标题使用思源宋体，正文使用思源黑体
 
 ## 运行与测试
+CI（`.github/workflows/tests.yml`）会在 GitHub Actions 的 runner 上安装 Godot 4.7.2 并跑下面三件事：
+导入资源 → core 逻辑测试 → 主场景空跑 + 界面冒烟测试，最后检查日志里不允许出现脚本错误。
+
 ```bash
 # 用 Godot 4.7 打开本目录，或直接运行主场景
 godot --headless --import                            # 首次先生成导入缓存（需要编辑器版）

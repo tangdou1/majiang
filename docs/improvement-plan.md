@@ -50,7 +50,7 @@
 
 | 编号 | 问题（现状） | 建议 | 优先级 | 工作量 |
 |---|---|---|---|---|
-| D1 | **零测试、零 CI**：core 层是纯逻辑（`win_checker`、`sichuan_rule`、`round_controller`），非常适合无头测试 | 加 Godot headless 测试（和牌形状、七对、向听、番数、杠分、流局、一炮多响）＋ GitHub Actions 跑 | ⭐⭐⭐ | 中 |
+| D1 | ✅ **已补**：`tests/run_tests.gd`（23 项 core 检查）+ `tests/ui_smoke.gd`（界面链路），`.github/workflows/tests.yml` 在 Actions 上装 Godot 4.7.2 无头运行，并断言日志里没有脚本错误 | 后续可再加流局/一炮多响的专项用例 | ⭐⭐⭐ | 中 |
 | D2 | 仓库缺 `.gitignore`（`.godot/`、`export/` 会直接污染状态）、缺 `LICENSE`；README 提到的 `tools/gen_sounds.py`、`tools/split_voice.py` **并不存在**，音效/人声无法复现 | 补 `.gitignore`、`LICENSE`（MIT/CC-BY 说明字体与音频授权）、把生成脚本补进 `tools/` | ⭐⭐⭐ | 小 |
 | D3 | 无自动构建：v1.0 的 APK 是手工传的 debug 包 | Actions 自动导出 APK/AAB 并挂 Release | ⭐⭐ | 中 |
 | D4 | `game_view.gd` 952 行巨石，UI 样式 `add_theme_*_override` 散落各处；常量、节奏、颜色到处硬编码 | 拆成 牌桌/手牌/牌河/特效/结算 组件；抽 `Theme` 资源与 `config.gd` 常量表 | ⭐⭐ | 大 |

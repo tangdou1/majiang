@@ -43,12 +43,19 @@ jobs:
           ./godot --headless --path . --script res://tests/ui_smoke.gd 2>&1 | tee /tmp/ui.log
           echo "::notice title=界面冒烟测试::$(grep -E '通过|失败|SMOKE|标记' /tmp/ui.log | tr '\n' ' ' | cut -c1-900)"
 
-      - name: 汇总运行日志里的错误（先只报告）
+      - name: 运行日志里不允许出现脚本错误
         if: always()
         run: |
+          fail=0
           for f in /tmp/import.log /tmp/core.log /tmp/main.log /tmp/ui.log; do
             [ -f "$f" ] || continue
-            n=$(grep -cE 'SCRIPT ERROR|ERROR:' "$f" || true)
-            first=$(grep -E 'SCRIPT ERROR|ERROR:' "$f" | head -1 | cut -c1-400)
-            echo "::notice title=$(basename "$f") 错误 $n 行::${first:-无}"
+            # 退出时“resources still in use”是引擎的良性提示（静态缓存的字体/贴图），放行
+            bad=$(grep -E 'SCRIPT ERROR|ERROR:' "$f" | grep -v 'resources still in use at exit' || true)
+            if [ -n "$bad" ]; then
+              echo "::error title=$(basename "$f") 出现脚本错误::$(echo "$bad" | head -1 | cut -c1-400)"
+              fail=1
+            else
+              echo "::notice title=$(basename "$f")::无脚本错误"
+            fi
           done
+          exit $fail
