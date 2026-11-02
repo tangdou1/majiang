@@ -4,15 +4,18 @@ extends Control
 
 signal start_requested(rule_id: String, pace: float)
 
-## 动画节奏固定为最慢档，便于观察其他玩家的出牌过程
-const PACE := 0.7
-
 var _sfx: Sfx = null
+
+static var _tutorial_shown: bool = false   ## 每次启动只在第一次进菜单时自动弹一次
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	Settings.load_settings()
 	_build()
+	if Settings.show_tutorial and not _tutorial_shown:
+		_tutorial_shown = true
+		_open_help.call_deferred()
 
 
 func _draw() -> void:
@@ -94,17 +97,49 @@ func _build() -> void:
 		l.add_theme_color_override("font_color", Color("4e342e"))
 		v.add_child(l)
 
-	var listen := _button("试听人声", Color("5d4037"), 360)
+	var tools := HBoxContainer.new()
+	tools.add_theme_constant_override("separation", 12)
+	v.add_child(tools)
+	var listen := _button("试听人声", Color("5d4037"), 190)
 	listen.add_theme_font_size_override("font_size", 26)
-	listen.custom_minimum_size = Vector2(360, 60)
+	listen.custom_minimum_size = Vector2(190, 64)
 	listen.pressed.connect(_play_sample)
-	v.add_child(listen)
+	tools.add_child(listen)
+	var help_btn := _button("玩法", Color("6d4c41"), 110)
+	help_btn.add_theme_font_size_override("font_size", 26)
+	help_btn.custom_minimum_size = Vector2(110, 64)
+	help_btn.pressed.connect(_open_help)
+	tools.add_child(help_btn)
+
+	var settings_btn := _button("设置", Color("455a64"), 110)
+	settings_btn.add_theme_font_size_override("font_size", 26)
+	settings_btn.custom_minimum_size = Vector2(110, 64)
+	settings_btn.pressed.connect(_open_settings)
+	tools.add_child(settings_btn)
 
 	var start := _button("开始对局", Color("2e7d32"), 360)
 	start.add_theme_font_size_override("font_size", 40)
 	start.custom_minimum_size = Vector2(360, 96)
-	start.pressed.connect(func() -> void: start_requested.emit("sichuan", PACE))
+	start.pressed.connect(func() -> void: start_requested.emit("sichuan", Settings.pace()))
 	v.add_child(start)
+
+
+func _open_help() -> void:
+	if has_node("HelpView"):
+		return
+	Settings.load_settings()
+	var view := HelpView.new()
+	view.name = "HelpView"
+	add_child(view)
+
+
+func _open_settings() -> void:
+	if has_node("SettingsView"):
+		return
+	Settings.load_settings()
+	var view := SettingsView.new()
+	view.name = "SettingsView"
+	add_child(view)
 
 
 ## 试听：报牌 + 叫牌（用于确认手机的声音输出）

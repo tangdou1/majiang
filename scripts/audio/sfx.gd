@@ -9,6 +9,8 @@ const SOUNDS := ["whoosh", "impact_stone", "impact_glass", "impact_wood", "impac
 const CALLS := ["peng", "gang", "hu", "zimo", "angang", "buggang"]
 const POOL_SIZE := 14
 
+const SEAT_PITCH := [1.0, 0.93, 1.06, 0.88]   ## 每个座位的人声音高，让四个玩家听起来不是同一个人
+
 var _streams := {}
 var _voices := {}
 var _pool: Array[AudioStreamPlayer] = []
@@ -18,11 +20,12 @@ var spoken := 0   ## 已播报的语音次数（用于自检）
 
 
 func _ready() -> void:
+	Settings.apply_audio()
 	for name in SOUNDS:
 		_streams[name] = load("res://assets/sfx/%s.wav" % name)
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer.new()
-		p.bus = "Master"
+		p.bus = Settings.BUS_SFX
 		add_child(p)
 		_pool.append(p)
 	for name in CALLS:
@@ -32,8 +35,8 @@ func _ready() -> void:
 		_voices["t%d" % s] = load("res://assets/voice/t%d.wav" % s)
 		_voices["s%d" % s] = load("res://assets/voice/s%d.wav" % s)
 	_voice_player = AudioStreamPlayer.new()
-	_voice_player.bus = "Master"
-	_voice_player.volume_db = 6.0
+	_voice_player.bus = Settings.BUS_VOICE
+	_voice_player.volume_db = 3.0
 	add_child(_voice_player)
 
 
@@ -58,21 +61,22 @@ func play_tile_impact(suit: int, rank: int) -> void:
 		_: play("impact_wood", pitch, -2.0)
 
 
-## 报牌：播放“X万/X筒/X条”
-func speak_tile(suit: int, rank: int) -> void:
+## 报牌：播放“X万/X筒/X条”。seat 用来区分说话的人（不同音高）
+func speak_tile(suit: int, rank: int, seat: int = 0) -> void:
 	var prefix: String = ["w", "t", "s"][suit]
-	_speak("%s%d" % [prefix, rank])
+	_speak("%s%d" % [prefix, rank], seat)
 
 
 ## 叫牌词：name 为 peng / gang / hu / zimo / angang / buggang
-func speak_call(name: String) -> void:
-	_speak(name)
+func speak_call(name: String, seat: int = 0) -> void:
+	_speak(name, seat)
 
 
-func _speak(key: String) -> void:
+func _speak(key: String, seat: int = 0) -> void:
 	if not _voices.has(key):
 		return
 	spoken += 1
 	_voice_player.stop()
+	_voice_player.pitch_scale = SEAT_PITCH[posmod(seat, SEAT_PITCH.size())]
 	_voice_player.stream = _voices[key]
 	_voice_player.play()

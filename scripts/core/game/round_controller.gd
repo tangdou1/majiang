@@ -22,6 +22,8 @@ var pace_time: float = 0.45 ## AI 动作间隔（秒）；测试时设为 0
 var wall: TileWall
 var round_over: bool = false
 var draw_game: bool = false
+var cancelled: bool = false   ## 玩家中途退出/重开时置位，用于干净地结束协程
+var running: bool = false     ## 本局协程是否还在跑（退出时用来等它收尾）
 
 
 func _init(p_rule: MahjongRule, p_players: Array, p_dealer: int) -> void:
@@ -33,6 +35,14 @@ func _init(p_rule: MahjongRule, p_players: Array, p_dealer: int) -> void:
 
 func player(seat: int) -> Player:
 	return players[seat]
+
+
+## 中止本局：退出对局/重新开始时调用，让所有挂起的 await 立刻返回
+func cancel() -> void:
+	cancelled = true
+	for p in players:
+		if p is HumanPlayer:
+			(p as HumanPlayer).cancel()
 
 
 func active_count() -> int:
@@ -49,7 +59,16 @@ func _next(seat: int) -> int:
 
 # ============================ 主流程 ============================
 
+## 对外入口：包一层 running 标记，方便界面在释放自己之前等待协程真正结束
 func play() -> void:
+	if running:
+		return
+	running = true
+	await _play()
+	running = false
+
+
+func _play() -> void:
 	for p in players:
 		(p as Player).reset_for_round()
 	_deal()
@@ -59,6 +78,8 @@ func play() -> void:
 	if rule.requires_missing_suit():
 		for p in players:
 			var suit: int = await (p as Player).decide_missing_suit(rule)
+			if cancelled:
+				return
 			(p as Player).missing_suit = suit
 			message.emit((p as Player).seat, "定缺·" + Tile.SUIT_CHARS[suit])
 		await _pace()
@@ -68,6 +89,8 @@ func play() -> void:
 	var replacement := false
 
 	while not round_over:
+		if cancelled:
+			return
 		var p: Player = players[current]
 		if p.finished:
 			current = _next(current)
@@ -83,8 +106,12 @@ func play() -> void:
 			tile_drawn.emit(current, drawn)
 			turn_changed.emit(current)
 			await _pace()
+			if cancelled:
+				return
 
 			var action := await _self_phase(p, drawn)
+			if cancelled:
+				return
 			if action == "hu":
 				if round_over:
 					break
@@ -100,6 +127,8 @@ func play() -> void:
 		turn_changed.emit(current)
 		var allowed := _allowed_discards(p)
 		var discard: Tile = await p.decide_discard(allowed, rule)
+		if cancelled:
+			return
 		# 防御：出牌必须是手中且可打的牌，否则改打第一张可打牌
 		if discard == null or not p.hand.concealed.has(discard) or not allowed.has(discard):
 			discard = allowed[0]
@@ -110,6 +139,8 @@ func play() -> void:
 
 		# ---- 别家响应 ----
 		var outcome := await _claim_phase(current, discard)
+		if cancelled:
+			return
 		if outcome == "hu" or outcome == "none":
 			if round_over:
 				break
@@ -138,9 +169,12 @@ func _finish_draw() -> void:
 	message.emit(-1, "流局")
 
 
+## 行动间隔。process_always = false：暂停游戏时计时器一起停住
 func _pace() -> void:
+	if cancelled:
+		return
 	if pace_time > 0.0:
-		await (Engine.get_main_loop() as SceneTree).create_timer(pace_time).timeout
+		await (Engine.get_main_loop() as SceneTree).create_timer(pace_time, false).timeout
 
 
 # ============================ 自摸阶段 ============================
@@ -213,6 +247,8 @@ func _claim_phase(discarder: int, d: Tile) -> String:
 		if opts.is_empty():
 			continue
 		var choice: Variant = await p.decide_option(opts, "claim", rule)
+		if cancelled:
+			return "none"
 		if choice != null:
 			responses[seat] = choice
 
@@ -282,7 +318,7 @@ func _do_claim_meld(p: Player, d: Tile, discarder: int, action: String) -> void:
 		tiles.append(d)
 		var m := Meld.new(Meld.Type.KONG_OPEN, tiles, discarder)
 		p.hand.melds.append(m)
-		_apply(rule.kong_transfers(m.type, p.seat, discarder))
+		_apply(rule.kong_transfers(m.type, p.seat, discarder), "kong")
 		meld_made.emit(p.seat, m)
 		message.emit(p.seat, "杠")
 	else:
@@ -298,7 +334,7 @@ func _do_concealed_kong(p: Player, kind: int) -> void:
 	var tiles := p.hand.remove_kind(kind, 4)
 	var m := Meld.new(Meld.Type.KONG_CONCEALED, tiles, p.seat)
 	p.hand.melds.append(m)
-	_apply(rule.kong_transfers(m.type, p.seat, -1))
+	_apply(rule.kong_transfers(m.type, p.seat, -1), "kong")
 	meld_made.emit(p.seat, m)
 
 
@@ -308,7 +344,7 @@ func _do_added_kong(p: Player, kind: int) -> void:
 	p.hand.remove(t)
 	m.tiles.append(t)
 	m.type = Meld.Type.KONG_ADDED
-	_apply(rule.kong_transfers(m.type, p.seat, -1))
+	_apply(rule.kong_transfers(m.type, p.seat, -1), "kong")
 	meld_made.emit(p.seat, m)
 
 
@@ -328,14 +364,16 @@ func _ctx(p: Player, self_drawn: bool, t: Tile, discarder: int) -> WinContext:
 func _record_win(p: Player, res: WinResult, self_drawn: bool, discarder: int) -> void:
 	p.finished = true
 	p.win_result = res
-	_apply(rule.settle_win(res, p.seat, discarder, self_drawn, dealer))
+	_apply(rule.settle_win(res, p.seat, discarder, self_drawn, dealer), "win")
 	player_won.emit(p.seat, res, self_drawn)
 	if not rule.allows_multiple_winners() or active_count() <= 1:
 		round_over = true
 
 
-func _apply(transfers: Array) -> void:
+## 应用转账并打上原因标记（"win" 胡牌 / "kong" 杠分），界面用来列收付明细
+func _apply(transfers: Array, reason: String) -> void:
 	for tr in transfers:
+		tr["reason"] = reason
 		(players[tr["from"]] as Player).score -= tr["amount"]
 		(players[tr["to"]] as Player).score += tr["amount"]
 	if not transfers.is_empty():
