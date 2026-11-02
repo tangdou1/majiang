@@ -30,7 +30,8 @@ static func _fade_ramp(color: Color) -> Gradient:
 
 
 ## 选牌火花：牌被抬起时向四周散开的小光点
-static func sparkle(parent: Node, pos: Vector2, color: Color, amount: int = 18) -> void:
+## flat = true 时按桌面视角铺开（横向散开、上抛更少），用于打牌落地的火花
+static func sparkle(parent: Node, pos: Vector2, color: Color, amount: int = 18, flat: bool = false) -> void:
 	var p := CPUParticles2D.new()
 	p.position = pos
 	p.texture = dot()
@@ -42,6 +43,12 @@ static func sparkle(parent: Node, pos: Vector2, color: Color, amount: int = 18) 
 	p.initial_velocity_min = 110.0
 	p.initial_velocity_max = 260.0
 	p.gravity = Vector2(0, 340)
+	if flat:
+		p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+		p.emission_rect_extents = Vector2(22.0, 2.0)
+		p.initial_velocity_min = 90.0
+		p.initial_velocity_max = 210.0
+		p.gravity = Vector2(0, 150)
 	p.scale_amount_min = 0.12
 	p.scale_amount_max = 0.3
 	p.color_ramp = _fade_ramp(UiTheme.hot(color, 1.9))

@@ -486,6 +486,25 @@ func _refresh() -> void:
 	_refresh_labels()
 
 
+## 桌面安全区：木框(26) 内再留一圈余量。所有牌与文字都必须落在这里面。
+## 注：stretch 为 canvas_items + expand，画布只会比 1920x1080 更大（宽或高一侧增长），
+## 但纵向牌数会随副露增加（4 杠 + 2 张手牌可达 18 张），竖排仍可能溢出桌外。
+const SAFE_INSET := 34.0
+
+
+func _safe_rect() -> Rect2:
+	return Rect2(SAFE_INSET, SAFE_INSET,
+		maxf(size.x - SAFE_INSET * 2.0, 240.0),
+		maxf(size.y - SAFE_INSET * 2.0, 240.0))
+
+
+## 把一段横向排列（宽 len、居中于 center_x）夹进安全区
+func _clamp_row_start(center_x: float, len: float) -> float:
+	var r := _safe_rect()
+	var x := center_x - len * 0.5
+	return clampf(x, r.position.x, maxf(r.position.x, r.end.x - len))
+
+
 ## 计算每张牌的目标位置（屏幕坐标）。返回 Array[Dictionary]
 func _build_entries() -> Array:
 	var out: Array = []
@@ -505,7 +524,8 @@ func _build_entries() -> Array:
 	var n := ordered.size() + (1 if drawn != null else 0)
 	var gap := hw * 0.34 if drawn != null else 0.0
 	var total := hw * n + gap
-	var x := (w - total) * 0.5
+	var hand_x := _clamp_row_start(w * 0.5, total)
+	var x := hand_x
 	for i in ordered.size():
 		var t: Tile = ordered[i]
 		var lifted := _selected_tile == t
@@ -529,7 +549,7 @@ func _build_entries() -> Array:
 	# 手牌上方：副露
 	var mw := hw * 0.62
 	var mh := mw * 1.42
-	var mx := (w - total) * 0.5
+	var mx := hand_x
 	var my := hand_top - mh * 0.5 - 16.0
 	for m in hand.melds:
 		for t in m.tiles:
@@ -546,7 +566,7 @@ func _build_entries() -> Array:
 	var top_p := _players[2] as Player
 	var items := _seat_items(top_p, 2)
 	var step := sw * 0.98
-	var x0 := (w - step * items.size()) * 0.5
+	var x0 := _clamp_row_start(w * 0.5, step * items.size())
 	for i in items.size():
 		var it: Array = items[i]
 		out.append(_entry(it[0], it[1], Vector2(x0 + step * i + sw * 0.5, 124.0), Vector2(sw, sh), 0.0, Color(0, 0, 0, 0), false, Vector2(w * 0.5, 124.0), it[2]))
@@ -558,14 +578,21 @@ func _build_entries() -> Array:
 
 
 func _side(out: Array, p: Player, seat: int, is_left: bool, sw: float, sh: float) -> void:
-	var w := size.x
+	var r := _safe_rect()
 	var items := _seat_items(p, seat)
+	if items.is_empty():
+		return
 	var rot := PI / 2.0 if is_left else -PI / 2.0
-	var cx := 30.0 + sh * 0.5 if is_left else w - 30.0 - sh * 0.5
-	var y := 156.0
-	for it in items:
-		out.append(_entry(it[0], it[1], Vector2(cx, y + sw * 0.5), Vector2(sw, sh), rot, Color(0, 0, 0, 0), false, _seat_origin(seat), it[2]))
-		y += sw * 0.96
+	var cx := r.position.x + sh * 0.5 if is_left else r.end.x - sh * 0.5
+	var y := maxf(156.0, r.position.y + sw * 0.5)
+	# 竖直方向放不下时（副露多 / 超长屏）压缩间距，保证最后一张仍在桌内
+	var step := sw * 0.96
+	if items.size() > 1:
+		var max_step := (r.end.y - sw * 0.5 - y) / float(items.size() - 1)
+		step = clampf(minf(step, max_step), 4.0, sw * 0.96)
+	for i in items.size():
+		var it: Array = items[i]
+		out.append(_entry(it[0], it[1], Vector2(cx, y + step * i), Vector2(sw, sh), rot, Color(0, 0, 0, 0), false, _seat_origin(seat), it[2]))
 
 
 ## 副露 + 背面牌序列。返回 [tile|null, face_down, key]
@@ -604,8 +631,8 @@ func _pool_tiles() -> Array:
 
 func _pool_entries(out: Array) -> void:
 	var tiles := _pool_tiles()
-	var ox := (size.x - POOL_COLS * POOL_CELL.x) * 0.5
-	var oy := 168.0
+	var ox := _clamp_row_start(size.x * 0.5, POOL_COLS * POOL_CELL.x)
+	var oy := maxf(168.0, _safe_rect().position.y)
 	for i in tiles.size():
 		var r := i / POOL_COLS
 		var c := i % POOL_COLS
@@ -717,11 +744,16 @@ func _arc_step(t: float, v: TileView, s: Vector2, c: Vector2, e: Vector2) -> voi
 func _on_discard_land(t: Tile, pos: Vector2, v: TileView) -> void:
 	v.set_meta("flying", false)
 	_refresh()  # 同步到牌河的最终位置
+	# 落桌挤压回弹：牌先被压扁再弹回，配合震屏才有重量感（走 squash，不抢 scale 补间）
+	v.squash = Vector2(1.18, 0.82)
+	var st := v.create_tween()
+	st.tween_property(v, "squash", Vector2(0.94, 1.06), 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	st.tween_property(v, "squash", Vector2.ONE, 0.16).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	_bubble(pos + Vector2(0, -52), _tile_name(t), CREAM)
 	_sfx.play_tile_impact(t.suit, t.rank)
 	_sfx.play("shimmer", 1.0, -14.0)
 	_burst_at(pos, SUIT_COLORS[t.suit], 0.9)
-	Vfx.sparkle(_fx_layer, pos, SUIT_COLORS[t.suit].lightened(0.3), 12)
+	Vfx.sparkle(_fx_layer, pos, SUIT_COLORS[t.suit].lightened(0.3), 12, true)
 	_shake(5.0)
 	# 落地后稍等一下再报牌名，让撞击声先出现
 	var tw := create_tween()
@@ -1321,8 +1353,8 @@ func _layout_static() -> void:
 	_info.size = Vector2(700, 30)
 	var hw := minf(124.0, (w - 240.0) / 14.2)
 	var hh := hw * 1.42
-	_hint.position = Vector2(w - 620.0, h - hh - 118.0)
 	_hint.size = Vector2(580.0, 34.0)
+	_hint.position = Vector2(maxf(w - 620.0, _safe_rect().position.x), h - hh - 118.0)
 	var menu := find_child("MenuButton", false, false) as Control
 	if menu:
 		menu.position = Vector2(w - 130, 6)
@@ -1335,16 +1367,22 @@ func _layout_static() -> void:
 		Vector2(w * 0.5 - 130, 8),
 		Vector2(side_tile_height + 45, h * 0.35),
 	]
+	var safe := _safe_rect()
 	for i in _score_labels.size():
-		_score_labels[i].position = seat_positions[i]
-		_chips[i].position = seat_positions[i] + (Vector2(250, 0) if i == 2 else Vector2(0, 34))
+		var pos: Vector2 = seat_positions[i]
+		# 名字 + 定缺标签最多占 250px，整体夹进安全区
+		pos.x = clampf(pos.x, safe.position.x, maxf(safe.position.x, safe.end.x - 250.0))
+		pos.y = clampf(pos.y, safe.position.y, maxf(safe.position.y, safe.end.y - 70.0))
+		_score_labels[i].position = pos
+		_chips[i].position = pos + (Vector2(250, 0) if i == 2 else Vector2(0, 34))
 	_ambient.position = Vector2(w * 0.5, h * 0.5)
 	_ambient.emission_rect_extents = Vector2(w * 0.5, h * 0.5)
 	_banner.position = Vector2(0, h * 0.42)
 	_banner.size = Vector2(w, 110)
 	_banner.pivot_offset = Vector2(w * 0.5, 55)
-	_action_bar.position = Vector2(w * 0.5 - 420, 640)
 	_action_bar.size = Vector2(840, 90)
+	_action_bar.position = Vector2(clampf(w * 0.5 - 420, safe.position.x, maxf(safe.position.x, safe.end.x - 840)),
+		minf(640.0, safe.end.y - 110.0))
 
 
 func _on_resized() -> void:

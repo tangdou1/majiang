@@ -33,6 +33,15 @@ var tile: Tile = null
 var face_down: bool = false
 var glow: Color = Color(0, 0, 0, 0)   ## 发光颜色（alpha 为 0 时不显示）
 
+## 落桌挤压系数（围绕牌中心做非等比缩放）。
+## 走独立属性而不是节点的 scale，这样不会和位移/缩放补间互相打断。
+var squash: Vector2 = Vector2.ONE:
+	set(value):
+		if squash.is_equal_approx(value):
+			return
+		squash = value
+		queue_redraw()
+
 
 func setup(p_tile: Tile, p_face_down: bool = false) -> TileView:
 	tile = p_tile
@@ -59,6 +68,10 @@ func _draw() -> void:
 	if w < 2.0 or h < 2.0:
 		return
 	var rect := Rect2(Vector2.ZERO, size)
+	# 挤压：把所有后续绘制围绕牌的几何中心做非等比缩放
+	if not squash.is_equal_approx(Vector2.ONE):
+		draw_set_transform(
+			Vector2(w * 0.5 * (1.0 - squash.x), h * 0.5 * (1.0 - squash.y)), 0.0, squash)
 	if glow.a > 0.01:
 		var g := StyleBoxFlat.new()
 		# 推到 HDR 亮度，让选中/最新打出这张牌的描边真正“亮”起来（见 Glow）

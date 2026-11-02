@@ -38,6 +38,9 @@ static func burst(parent: Node, pos: Vector2, color: Color, strength: float = 1.
 	p.initial_velocity_min = 140.0 * strength
 	p.initial_velocity_max = 320.0 * strength
 	p.gravity = Vector2(0, 260)
+	# 俯视桌面：从一条横向短线上升起，碎屑沿桌面铺开，而不是从一点球状炸开
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	p.emission_rect_extents = Vector2(16.0 * strength, 2.0)
 	p.texture = Vfx.dot()
 	p.scale_amount_min = 0.14 * strength
 	p.scale_amount_max = 0.34 * strength
