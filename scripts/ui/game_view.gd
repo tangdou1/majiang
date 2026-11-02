@@ -21,7 +21,7 @@ var _round: RoundController
 var _players: Array = []
 var _human: HumanPlayer
 var _sfx: Sfx
-var _speed: float = 0.7
+var _speed: float = 1.0
 var _reveal: bool = false             # 一局结束后翻开 AI 的手牌
 var _ambient: CPUParticles2D         # 牌桌上的漂浮光点
 var _chips: Array[PanelContainer] = []  # 每家的定缺标签
@@ -150,7 +150,6 @@ func _connect_round(r: RoundController) -> void:
 		_bubble(center + Vector2(0, -60), _meld_call_name_cn(m), GOLD)
 		_call_stamp(_meld_call_name_cn(m), GOLD)
 		_sfx.speak_call(_meld_call_name(m), seat)
-		_vibrate(30)
 		if m.from_seat >= 0 and m.from_seat != seat and not m.tiles.is_empty():
 			var src := _players[m.from_seat] as Player
 			var taken := m.tiles[m.tiles.size() - 1]
@@ -331,11 +330,6 @@ func _discard_seat(t: Tile) -> int:
 	if _tile_seat.has(id):
 		return int(_tile_seat[id])
 	return 0
-
-
-func _vibrate(ms: int) -> void:
-	if Settings.vibrate and OS.has_feature("mobile"):
-		Input.vibrate_handheld(ms)
 
 
 func _option_text(opt: Dictionary, phase: String) -> String:
@@ -710,7 +704,6 @@ func _on_discard_land(t: Tile, pos: Vector2, v: TileView) -> void:
 	_burst_at(pos, SUIT_COLORS[t.suit], 0.9)
 	Vfx.sparkle(_fx_layer, pos, SUIT_COLORS[t.suit].lightened(0.3), 12)
 	_shake(5.0)
-	_vibrate(14)
 	# 落地后稍等一下再报牌名，让撞击声先出现
 	var tw := create_tween()
 	tw.tween_interval(0.12)
@@ -835,7 +828,6 @@ func _celebrate(seat: int, self_drawn: bool) -> void:
 	tw.tween_property(_overlay, "color:a", 0.35, 0.12)
 	tw.tween_property(_overlay, "color:a", 0.0, 0.8)
 	_shake(10.0)
-	_vibrate(60)
 	var fw := _overlay.create_tween()
 	var w := size.x
 	var h := size.y
@@ -1142,7 +1134,14 @@ func _open_settings_in_pause() -> void:
 	Settings.load_settings()
 	var view := SettingsView.new()
 	view.name = "PauseSettingsView"
+	view.closed.connect(_apply_pace_setting)
 	add_child(view)
+
+
+func _apply_pace_setting() -> void:
+	_speed = Settings.pace()
+	if _round != null:
+		_round.pace_time = _speed
 
 
 ## 干净地结束本局：取消协程、唤醒挂起的等待，之后才真正释放牌桌
@@ -1247,6 +1246,7 @@ func _build_static_ui() -> void:
 	for i in MahjongRule.PLAYER_COUNT:
 		var l := Label.new()
 		l.add_theme_font_size_override("font_size", 26)
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		l.add_theme_color_override("font_color", CREAM)
 		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 		l.add_theme_constant_override("outline_size", 6)
@@ -1306,9 +1306,18 @@ func _layout_static() -> void:
 	var menu := find_child("MenuButton", false, false) as Control
 	if menu:
 		menu.position = Vector2(w - 130, 6)
+	# 座位顺序：自己（下）、右家、对家（上）、左家。
+	# 名字与定缺标记分组放在对应手牌旁，避免与中央牌河重叠。
+	var side_tile_height := hw * 0.44 * 1.42
+	var seat_positions := [
+		Vector2(side_tile_height + 45, h - hh - 160),
+		Vector2(w - side_tile_height - 290, h * 0.35),
+		Vector2(w * 0.5 - 130, 8),
+		Vector2(side_tile_height + 45, h * 0.35),
+	]
 	for i in _score_labels.size():
-		_score_labels[i].position = Vector2(w * 0.5 - 470 + i * 240, 14)
-		_chips[i].position = Vector2(w * 0.5 - 470 + i * 240, 50)
+		_score_labels[i].position = seat_positions[i]
+		_chips[i].position = seat_positions[i] + (Vector2(250, 0) if i == 2 else Vector2(0, 34))
 	_ambient.position = Vector2(w * 0.5, h * 0.5)
 	_ambient.emission_rect_extents = Vector2(w * 0.5, h * 0.5)
 	_banner.position = Vector2(0, h * 0.42)

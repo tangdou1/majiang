@@ -1,6 +1,6 @@
 class_name SettingsView
 extends Control
-## 设置面板：出牌节奏、音效音量、人声音量、静音、震动。
+## 设置面板：出牌节奏、音效音量、人声音量、静音。
 ## 改动立即生效并写入 user://settings.cfg；面板本身由调用方添加/释放。
 
 signal closed
@@ -92,14 +92,6 @@ func _build() -> void:
 	mute.toggled.connect(_on_mute)
 	v.add_child(mute)
 
-	var vib := CheckButton.new()
-	vib.text = "出牌/和牌时震动（手机）"
-	vib.button_pressed = Settings.vibrate
-	vib.add_theme_font_size_override("font_size", 28)
-	_set_check_text_color(vib)
-	vib.toggled.connect(_on_vibrate)
-	v.add_child(vib)
-
 	var done := _button("完成", 240, 72)
 	done.add_theme_font_size_override("font_size", 32)
 	done.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -182,11 +174,6 @@ func _refresh_value_labels() -> void:
 
 func _on_mute(on: bool) -> void:
 	Settings.muted = on
-	Settings.save_settings()
-
-
-func _on_vibrate(on: bool) -> void:
-	Settings.vibrate = on
 	Settings.save_settings()
 
 
