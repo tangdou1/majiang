@@ -349,17 +349,29 @@ func _option_text(opt: Dictionary, phase: String) -> String:
 
 # ============================ 听牌提示 ============================
 
-## 四家可见的每种牌张数（手牌 + 副露 + 牌河），用来算“还剩几张”
+## 场上可见的每种牌张数（自己手牌 + 四家牌河 + 别家副露），用来算“还剩几张”
+## 注意：绝不能算其他玩家手中的暗牌（否则等于开透视挂且导致剩余牌数计算不符合玩家已知信息）
 func _visible_kind_counts() -> PackedInt32Array:
 	var c := PackedInt32Array()
 	c.resize(WinChecker.KINDS)
 	c.fill(0)
+	if _human == null:
+		return c
+	# 1. 玩家自己的全部手牌（暗牌 + 副露）完全可见
+	for t in _human.hand.all_tiles():
+		c[t.kind()] += 1
+	# 2. 四家牌河（已打出的弃牌）全部可见
 	for p in _players:
 		var pl := p as Player
-		for t in pl.hand.all_tiles():
-			c[t.kind()] += 1
 		for t in pl.discards:
 			c[t.kind()] += 1
+	# 3. 其他玩家的公开副露（碰、明杠、补杠、暗杠）全部可见
+	for p in _players:
+		var pl := p as Player
+		if pl != _human:
+			for m in pl.hand.melds:
+				for t in m.tiles:
+					c[t.kind()] += 1
 	return c
 
 
@@ -371,24 +383,27 @@ func _waits_total(waits: Array, visible: PackedInt32Array) -> int:
 	return total
 
 
-## “二万、五万（剩 3 张）”这样的文字；一张都不剩时返回空串
+## “二万、五万（剩 3 张）”这样的文字；waits 为空时返回空串
 func _waits_text(waits: Array, visible: PackedInt32Array) -> String:
+	if waits.is_empty():
+		return ""
 	var names: Array[String] = []
 	var total := 0
 	for k in waits:
-		var left := 4 - visible[k]
-		if left <= 0:
-			continue
+		var left := maxi(0, 4 - visible[k])
 		names.append(Tile.NUMBER_NAMES[k % 9] + Tile.SUIT_CHARS[k / 9])
 		total += left
-	if names.is_empty():
-		return ""
 	return "%s（剩 %d 张）" % ["、".join(names), total]
 
 
 func _waiting_kinds(hand: Hand) -> Array:
-	if rule == null:
+	if rule == null or _human == null:
 		return []
+	# 四川麻将等定缺规则：缺门牌未打光前不能胡牌，因此若手中仍有定缺花色的牌则不能算听牌
+	if rule.requires_missing_suit() and _human.missing_suit >= 0:
+		for t in hand.all_tiles():
+			if t.suit == _human.missing_suit:
+				return []
 	var waits: Array = rule.waiting_kinds_of(hand)
 	if _human.missing_suit >= 0:
 		waits = waits.filter(func(k: int) -> bool: return Tile.suit_of_kind(k) != _human.missing_suit)
@@ -397,45 +412,48 @@ func _waiting_kinds(hand: Hand) -> Array:
 
 ## 打哪张能听牌：优先看当前选中的那张，否则给出剩余张数最多的一种
 func _best_discard_hint(hand: Hand, visible: PackedInt32Array) -> String:
-	var candidates: Array = []
-	if _selected_tile != null and _allowed.has(_selected_tile):
-		candidates.append(_selected_tile)
-	for t in _allowed:
-		if t != _selected_tile:
-			candidates.append(t)
+	# 1. 如果当前选中了某张可打牌，明确反馈打出该牌的效果
+	if _selected_tile != null and hand.concealed.has(_selected_tile) and _allowed.has(_selected_tile):
+		var h2 := hand.clone()
+		h2.remove(_selected_tile)
+		var waits := _waiting_kinds(h2)
+		if not waits.is_empty():
+			return "打 %s → 听 %s" % [_tile_name(_selected_tile), _waits_text(waits, visible)]
+		return "打 %s 不听牌" % _tile_name(_selected_tile)
+
+	# 2. 未选牌时，从可打牌中找听牌剩余张数最多的一种推荐
 	var best_text := ""
 	var best_total := -1
-	for t in candidates:
-		if not hand.concealed.has(t):
+	var tested_kinds := {}
+	for t in _allowed:
+		if not hand.concealed.has(t) or tested_kinds.has(t.kind()):
 			continue
+		tested_kinds[t.kind()] = true
 		var h2 := hand.clone()
 		h2.remove(t)
 		var waits := _waiting_kinds(h2)
 		if waits.is_empty():
 			continue
 		var total := _waits_total(waits, visible)
-		if total <= 0:
-			continue
 		var text := "打 %s → 听 %s" % [_tile_name(t), _waits_text(waits, visible)]
-		if _selected_tile == t:
-			return text
 		if total > best_total:
 			best_total = total
 			best_text = text
-	if best_text == "" and _selected_tile != null:
-		return "打 %s 不听牌" % _tile_name(_selected_tile)
 	return best_text
 
 
 func _update_hint() -> void:
 	if _hint == null or rule == null or _human == null or _round == null:
 		return
+	var visible := _visible_kind_counts()
 	var ids := 0
 	for t in _human.hand.concealed:
 		ids += t.get_instance_id()
-	var key := "%d|%d|%d|%d|%d|%d" % [_mode.hash(), int(_round.round_over),
+	# key 包含 visible 的哈希值，当别人出牌/副露改变桌面可见牌时能实时更新“剩 X 张”
+	var key := "%d|%d|%d|%d|%d|%d|%d" % [_mode.hash(), int(_round.round_over),
 		_human.hand.concealed.size(), ids,
-		_selected_tile.get_instance_id() if _selected_tile != null else 0, int(_human.finished)]
+		_selected_tile.get_instance_id() if _selected_tile != null else 0, int(_human.finished),
+		visible.hash()]
 	if key == _hint_key:
 		return
 	_hint_key = key
@@ -446,10 +464,9 @@ func _update_hint() -> void:
 		var hand := _human.hand
 		var sets := 4 - hand.melds.size()
 		var size := hand.concealed.size()
-		var visible := _visible_kind_counts()
 		if size == sets * 3 + 2 and _mode == "discard":
 			text = _best_discard_hint(hand, visible)
-		elif size == sets * 3 + 1 and _human.missing_suit >= 0:
+		elif size == sets * 3 + 1 and (not rule.requires_missing_suit() or _human.missing_suit >= 0):
 			var waits := _waiting_kinds(hand)
 			var w := _waits_text(waits, visible)
 			if w != "":
