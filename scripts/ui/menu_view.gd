@@ -14,7 +14,7 @@ func _draw() -> void:
 	var steps := 48
 	for i in steps:
 		var t := float(i) / steps
-		draw_rect(Rect2(0, size.y * t, size.x, size.y / steps + 1), Color("123f2c").lerp(Color("071f16"), t))
+		draw_rect(Rect2(0, size.y * t, size.x, size.y / steps + 1), UiTheme.MENU_TOP.lerp(UiTheme.MENU_BOTTOM, t))
 	draw_rect(Rect2(14, 14, size.x - 28, size.y - 28), Color(0.95, 0.85, 0.6, 0.18), false, 4.0)
 
 
@@ -28,14 +28,14 @@ func _build() -> void:
 	title.text = "单机麻将"
 	UiFont.apply_title(title)
 	title.add_theme_font_size_override("font_size", 150)
-	title.add_theme_color_override("font_color", Color("ffe082"))
+	title.add_theme_color_override("font_color", UiTheme.hot(UiTheme.GOLD_SOFT, 1.35))
 	title.add_theme_color_override("font_outline_color", Color(0.3, 0.1, 0, 0.9))
 	title.add_theme_constant_override("outline_size", 14)
 	brand.add_child(title)
 	var sub := Label.new()
 	sub.text = "四 川 麻 将 · 血 战 到 底"
 	sub.add_theme_font_size_override("font_size", 40)
-	sub.add_theme_color_override("font_color", Color("c8e6c9"))
+	sub.add_theme_color_override("font_color", UiTheme.ON_FELT)
 	brand.add_child(sub)
 
 	# 左下：装饰牌（展示花色）
@@ -55,16 +55,7 @@ func _build() -> void:
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(760, 0)
 	card.position = Vector2(1000, 220)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("fff8e7")
-	sb.set_corner_radius_all(28)
-	sb.content_margin_left = 44
-	sb.content_margin_right = 44
-	sb.content_margin_top = 36
-	sb.content_margin_bottom = 36
-	sb.shadow_color = Color(0, 0, 0, 0.5)
-	sb.shadow_size = 24
-	card.add_theme_stylebox_override("panel", sb)
+	card.add_theme_stylebox_override("panel", UiTheme.panel_style(UiTheme.CARD, UiTheme.R_CARD, 44, 36))
 	add_child(card)
 
 	var v := VBoxContainer.new()
@@ -74,7 +65,7 @@ func _build() -> void:
 	name_l.text = "四川麻将 · 血战到底"
 	UiFont.apply_title(name_l)
 	name_l.add_theme_font_size_override("font_size", 46)
-	name_l.add_theme_color_override("font_color", Color("5d4037"))
+	name_l.add_theme_color_override("font_color", UiTheme.INK)
 	v.add_child(name_l)
 	for line in [
 		"· 开局每人定缺一门（万 / 筒 / 条）",
@@ -86,25 +77,25 @@ func _build() -> void:
 		var l := Label.new()
 		l.text = line
 		l.add_theme_font_size_override("font_size", 26)
-		l.add_theme_color_override("font_color", Color("4e342e"))
+		l.add_theme_color_override("font_color", UiTheme.INK_BODY)
 		v.add_child(l)
 
 	var tools := HBoxContainer.new()
 	tools.add_theme_constant_override("separation", 12)
 	v.add_child(tools)
-	var help_btn := _button("玩法", Color("6d4c41"), 110)
+	var help_btn := _button("玩法", UiTheme.BROWN, 110)
 	help_btn.add_theme_font_size_override("font_size", 26)
 	help_btn.custom_minimum_size = Vector2(110, 64)
 	help_btn.pressed.connect(_open_help)
 	tools.add_child(help_btn)
 
-	var settings_btn := _button("设置", Color("455a64"), 110)
+	var settings_btn := _button("设置", UiTheme.SLATE, 110)
 	settings_btn.add_theme_font_size_override("font_size", 26)
 	settings_btn.custom_minimum_size = Vector2(110, 64)
 	settings_btn.pressed.connect(_open_settings)
 	tools.add_child(settings_btn)
 
-	var start := _button("开始对局", Color("2e7d32"), 360)
+	var start := _button("开始对局", UiTheme.GREEN, 360)
 	start.add_theme_font_size_override("font_size", 40)
 	start.custom_minimum_size = Vector2(360, 96)
 	start.pressed.connect(func() -> void: start_requested.emit("sichuan", Settings.pace()))
@@ -130,20 +121,4 @@ func _open_settings() -> void:
 
 
 func _button(text: String, color: Color, min_w: int) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(min_w, 64)
-	b.add_theme_font_size_override("font_size", 30)
-	b.add_theme_color_override("font_color", Color.WHITE)
-	b.add_theme_color_override("font_pressed_color", Color("ffe082"))
-	for state in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = color.lightened(0.12) if state.begins_with("hover") else color
-		if state == "pressed":
-			sb.bg_color = color.darkened(0.2)
-		sb.set_corner_radius_all(18)
-		sb.shadow_color = Color(0, 0, 0, 0.35)
-		sb.shadow_size = 6
-		sb.shadow_offset = Vector2(0, 4)
-		b.add_theme_stylebox_override(state, sb)
-	return b
+	return UiTheme.make_button(text, color, min_w, 64, UiTheme.FS_BTN)

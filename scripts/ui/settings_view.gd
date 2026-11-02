@@ -5,10 +5,10 @@ extends Control
 
 signal closed
 
-const TEXT := Color("5d4037")
-const SUB := Color("8d6e63")
-const GREEN := Color("2e7d32")
-const GREY := Color("546e7a")
+const TEXT := UiTheme.INK
+const SUB := UiTheme.INK_MUTED
+const GREEN := UiTheme.GREEN
+const GREY := UiTheme.GREY
 
 var _pace_buttons: Array[Button] = []
 var _sfx_value: Label
@@ -146,11 +146,9 @@ func _on_pace_selected(index: int) -> void:
 func _refresh_pace_buttons() -> void:
 	for i in _pace_buttons.size():
 		var b := _pace_buttons[i]
-		var selected := i == Settings.pace_index
-		b.add_theme_stylebox_override("normal", _button_style(GREEN if selected else GREY))
-		b.add_theme_stylebox_override("hover", _button_style((GREEN if selected else GREY).lightened(0.12)))
-		b.add_theme_stylebox_override("pressed", _button_style((GREEN if selected else GREY).darkened(0.15)))
-		b.add_theme_stylebox_override("focus", _button_style(GREEN if selected else GREY))
+		var base := GREEN if i == Settings.pace_index else GREY
+		for state in ["normal", "hover", "pressed", "focus", "hover_pressed"]:
+			b.add_theme_stylebox_override(state, UiTheme.button_style(base, state))
 
 
 func _on_sfx_volume(value: float, _slider: HSlider) -> void:
@@ -184,36 +182,8 @@ func _set_check_text_color(button: CheckButton) -> void:
 
 
 func _button(text: String, min_w: int, min_h: int) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(min_w, min_h)
-	b.add_theme_font_size_override("font_size", 28)
-	b.add_theme_color_override("font_color", Color.WHITE)
-	for state in ["normal", "hover", "pressed", "focus"]:
-		b.add_theme_stylebox_override(state, _button_style(GREY))
-	return b
-
-
-func _button_style(color: Color) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = color
-	sb.set_corner_radius_all(16)
-	sb.content_margin_left = 18
-	sb.content_margin_right = 18
-	sb.shadow_color = Color(0, 0, 0, 0.3)
-	sb.shadow_size = 4
-	sb.shadow_offset = Vector2(0, 3)
-	return sb
+	return UiTheme.make_button(text, GREY, min_w, min_h, UiTheme.FS_LEAD)
 
 
 func _panel_style() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("fff8e7")
-	sb.set_corner_radius_all(28)
-	sb.content_margin_left = 48
-	sb.content_margin_right = 48
-	sb.content_margin_top = 36
-	sb.content_margin_bottom = 36
-	sb.shadow_color = Color(0, 0, 0, 0.5)
-	sb.shadow_size = 24
-	return sb
+	return UiTheme.panel_style(UiTheme.CARD, UiTheme.R_CARD, 48, 36)

@@ -4,9 +4,9 @@ extends Control
 
 signal closed
 
-const TEXT := Color("5d4037")
-const SUB := Color("8d6e63")
-const GREEN := Color("2e7d32")
+const TEXT := UiTheme.INK
+const SUB := UiTheme.INK_MUTED
+const GREEN := UiTheme.GREEN
 
 const SECTIONS := [
 	["怎么赢", "把 14 张牌凑成 4 组面子（三张相同或同花色顺子）+ 1 对将。四川麻将只有万、筒、条三门，共 108 张，没有吃，只能碰、杠、胡。"],
@@ -68,7 +68,7 @@ func _build() -> void:
 		var head := Label.new()
 		head.text = "· " + String(item[0])
 		head.add_theme_font_size_override("font_size", 28)
-		head.add_theme_color_override("font_color", Color("2e7d32"))
+		head.add_theme_color_override("font_color", GREEN)
 		list.add_child(head)
 		var body := Label.new()
 		body.text = String(item[1])
@@ -86,18 +86,7 @@ func _build() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(spacer)
 
-	var done := Button.new()
-	done.text = "知道了"
-	done.custom_minimum_size = Vector2(220, 66)
-	done.add_theme_font_size_override("font_size", 30)
-	done.add_theme_color_override("font_color", Color.WHITE)
-	for state in ["normal", "hover", "pressed", "focus"]:
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = GREEN.darkened(0.15) if state == "pressed" else GREEN
-		sb.set_corner_radius_all(16)
-		sb.content_margin_left = 18
-		sb.content_margin_right = 18
-		done.add_theme_stylebox_override(state, sb)
+	var done := UiTheme.make_button("知道了", GREEN, 220, 66, UiTheme.FS_BTN)
 	done.pressed.connect(close)
 	footer.add_child(done)
 
@@ -115,13 +104,4 @@ func _center() -> void:
 
 
 func _panel_style() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("fff8e7")
-	sb.set_corner_radius_all(28)
-	sb.content_margin_left = 48
-	sb.content_margin_right = 48
-	sb.content_margin_top = 32
-	sb.content_margin_bottom = 32
-	sb.shadow_color = Color(0, 0, 0, 0.5)
-	sb.shadow_size = 24
-	return sb
+	return UiTheme.panel_style(UiTheme.CARD, UiTheme.R_CARD, 48, 32)

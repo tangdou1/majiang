@@ -16,8 +16,12 @@ static func burst(parent: Node, pos: Vector2, color: Color, strength: float = 1.
 	var ring := Fx.new()
 	ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ring.position = pos
-	ring.ring_color = Color(color.r, color.g, color.b, 0.9)
+	# HDR：让冲击波参与 bloom
+	var hot := UiTheme.hot(color, 1.8)
+	ring.ring_color = Color(hot.r, hot.g, hot.b, 0.9)
 	ring.line_width = 6.0 * strength
+	# 俯视桌面：光圈压在桌面上，应是压扁的椭圆而不是正圆
+	ring.scale = Vector2(1.0, 0.42)
 	parent.add_child(ring)
 	var tw := ring.create_tween().set_parallel(true)
 	tw.tween_property(ring, "radius", 90.0 * strength, 0.45).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
@@ -34,10 +38,13 @@ static func burst(parent: Node, pos: Vector2, color: Color, strength: float = 1.
 	p.initial_velocity_min = 140.0 * strength
 	p.initial_velocity_max = 320.0 * strength
 	p.gravity = Vector2(0, 260)
+	# 俯视桌面：从一条横向短线上升起，碎屑沿桌面铺开，而不是从一点球状炸开
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	p.emission_rect_extents = Vector2(16.0 * strength, 2.0)
 	p.texture = Vfx.dot()
 	p.scale_amount_min = 0.14 * strength
 	p.scale_amount_max = 0.34 * strength
-	p.color = color
+	p.color = UiTheme.hot(color, 1.8)
 	p.emitting = true
 	parent.add_child(p)
 	get_tree_safe_free(p, 1.0, parent)
