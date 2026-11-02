@@ -166,23 +166,6 @@ func _deal() -> void:
 func _finish_draw() -> void:
 	round_over = true
 	draw_game = true
-	# 只对未胡牌的玩家做流局结算；settle_draw 用 0..n 索引，之后映射回真实座位
-	var hands: Array = []
-	var missing: Array[int] = []
-	var seats: Array[int] = []
-	for p in players:
-		var pl := p as Player
-		if pl.finished:
-			continue
-		hands.append(pl.hand)
-		missing.append(pl.missing_suit)
-		seats.append(pl.seat)
-	var transfers := rule.settle_draw(hands, missing)
-	if not transfers.is_empty():
-		for tr in transfers:
-			tr["from"] = seats[tr["from"]]
-			tr["to"] = seats[tr["to"]]
-		_apply(transfers, "draw")
 	message.emit(-1, "流局")
 
 
@@ -217,82 +200,10 @@ func _self_phase(p: Player, drawn: Tile) -> String:
 			message.emit(p.seat, "暗杠")
 			return "kong"
 		"kong_added":
-			var robbed := await _rob_added_kong(p, opt["kind"])
-			if robbed:
-				return "hu"
 			_do_added_kong(p, opt["kind"])
 			message.emit(p.seat, "补杠")
 			return "kong"
 	return "none"
-
-
-## 补杠前的抢杠窗口：其他三家可胡这张牌。返回 true 表示有人抢杠胡（杠被取消）
-func _rob_added_kong(p: Player, kind: int) -> bool:
-	var tile: Tile = p.hand.tiles_of_kind(kind)[0]
-	if tile == null:
-		return false
-	# 按座次询问其他三家
-	var order: Array[int] = []
-	for i in range(1, MahjongRule.PLAYER_COUNT):
-		order.append((p.seat + i) % MahjongRule.PLAYER_COUNT)
-	var responses := {}
-	for seat in order:
-		var q: Player = players[seat]
-		if q.finished:
-			continue
-		var opts := _rob_options(q, tile, p.seat)
-		if opts.is_empty():
-			continue
-		var choice: Variant = await q.decide_option(opts, "claim", rule)
-		if cancelled:
-			return false
-		if choice != null:
-			responses[seat] = choice
-	# 胡（一炮多响）
-	var winners: Array[int] = []
-	for seat in order:
-		if responses.has(seat) and responses[seat]["action"] == "hu":
-			winners.append(seat)
-	if winners.is_empty():
-		return false
-	# 杠被抢：这张牌归和牌者（杠家不标记 finished，可继续打）
-	p.hand.remove(tile)
-	message.emit(p.seat, "被抢杠")
-	var first := true
-	for seat in winners:
-		var q: Player = players[seat]
-		q.hand.add(tile)
-		var ctx := _ctx(q, false, tile, p.seat, true)
-		var res := rule.evaluate_win(q.hand, ctx)
-		if res == null:
-			q.hand.remove(tile)
-			continue
-		q.win_result = res
-		q.finished = true
-		_apply(rule.settle_win(res, q.seat, p.seat, false, dealer_seat), "win")
-		player_won.emit(q.seat, res, false)
-		if not first:
-			q.hand.remove(tile)
-		first = false
-		if _count_finished() == PLAYER_COUNT - 1:
-			round_over = true
-			break
-	return true
-
-
-## 抢杠选项：只有"胡"（抢杠胡只能胡，不能碰/杠）
-func _rob_options(p: Player, tile: Tile, discarder: int) -> Array:
-	var opts: Array = []
-	if p.finished:
-		return opts
-	if p.missing_suit >= 0 and tile.suit == p.missing_suit:
-		return opts
-	var h2 := p.hand.clone()
-	h2.add(tile)
-	var ctx := _ctx(p, false, tile, discarder, true)
-	if rule.evaluate_win(h2, ctx) != null:
-		opts.append({"action": "hu"})
-	return opts
 
 
 func _self_options(p: Player, drawn: Tile) -> Array:
@@ -439,7 +350,7 @@ func _do_added_kong(p: Player, kind: int) -> void:
 
 # ============================ 胡牌与结算 ============================
 
-func _ctx(p: Player, self_drawn: bool, t: Tile, discarder: int, robbed: bool = false) -> WinContext:
+func _ctx(p: Player, self_drawn: bool, t: Tile, discarder: int) -> WinContext:
 	var ctx := WinContext.new()
 	ctx.winner_seat = p.seat
 	ctx.self_drawn = self_drawn
@@ -447,7 +358,6 @@ func _ctx(p: Player, self_drawn: bool, t: Tile, discarder: int, robbed: bool = f
 	ctx.winning_tile = t
 	ctx.discarder_seat = discarder
 	ctx.missing_suit = p.missing_suit
-	ctx.robbed_kong = robbed
 	return ctx
 
 
